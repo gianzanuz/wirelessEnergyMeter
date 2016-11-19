@@ -12,7 +12,7 @@
 #define PWR1        3
 #define PWR2        4
 
-#define DEBUG
+//#define DEBUG
 
 /* Módulo WiFi ESP8266 */
 /* Pino de Enable = 2 */
@@ -28,7 +28,7 @@ int value2;
 int value3;
 
 ESP8266::server_parameter_t server;
-
+ESP8266::esp_wifi_config_t wifi;
 
 /* Valores Iniciais */
 void setup()
@@ -56,13 +56,12 @@ void setup()
     lcd.print("ESP: CONFIG OK");
   }
 
-  ESP8266::esp_wifi_config_t wifi;
-  strcpy(wifi.SSID, "WiFi WaFer");
-  strcpy(wifi.password, "moussedebanana");
+  wifi.SSID = "WiFi WaFer";
+  wifi.password = "moussedebanana";
 
-  strcpy(server.host, "thingspeak.com");
-  strcpy(server.path, "channels/183964");
-  strcpy(server.port, "80");
+  server.host = "api.thingspeak.com";
+  server.path = "/update";
+  server.port = "80";
 
   if(!esp.connectAP(wifi))
   {
@@ -76,11 +75,11 @@ void setup()
     lcd.print("ESP: CONNECT OK");
   }
   
-  //ESP8266::esp_wifi_config_t wifiList[ESP_AP_LIST_SIZE];
-  //esp.listAP(wifiList, ESP_AP_LIST_SIZE);
-  //lcd.print(wifiList[0].SSID); 
-  //lcd.setCursor(0,1);
-  //lcd.print(wifiList[0].signal);
+//  ESP8266::esp_wifi_config_t wifiList[ESP_AP_LIST_SIZE];
+//  esp.listAP(wifiList, ESP_AP_LIST_SIZE);
+//  lcd.print(wifiList[0].SSID); 
+//  lcd.setCursor(0,1);
+//  lcd.print(wifiList[0].signal);
 }
 
 void loop() 
@@ -107,18 +106,30 @@ void loop()
   
 #endif
 
-  if(esp.connectServer(server.host, server.port))
+  if(esp.connectServer(server))
   {
+      String payload;
+      payload  = "field1=" + String(value1) + "&";
+      payload += "field2=" + String(value2);
       lcd.clear();
       lcd.print("Thing: Connected OK");
-      esp.sendServer((char*) "api_key=UF6TH2DLPKQMA4SP&valor1=50&valor2=34", &server);
+      if(esp.sendServer(payload, server))
+      {
+          lcd.clear();
+          lcd.print("Thing: Send OK");
+      }
+      else
+      {
+          lcd.clear();
+          lcd.print("Thing: Send ERROR");
+      }
   }
   else
   {
       lcd.clear();
       lcd.print("Thing: Connected ERROR");
   }
-  delay(10000);
+  delay(60000);
 }
 
 

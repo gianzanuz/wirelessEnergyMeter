@@ -37,16 +37,16 @@ class ESP8266
 		*************************************************************************************/
 		struct esp_wifi_config_t
 		{
-			char SSID[25];
-			char password[25];
-			char signal[5];
+			String SSID;
+			String password;
+			String signal;
 		};
 
 		struct server_parameter_t
 		{
-			char host[50];
-			char path[50];
-			char port[25];
+			String host;
+			String path;
+			String port;
 		};
 
 //char* HTML_PAGE = (char*)
@@ -76,11 +76,11 @@ class ESP8266
 		*************************************************************************************/
 		ESP8266(int pin = 0);
 		int listAP(esp_wifi_config_t* ap_list, int ap_list_size = 20);
-		bool connectAP(esp_wifi_config_t wifiConfig);
+		bool connectAP(esp_wifi_config_t &wifiConfig);
 		bool config(void);
 		bool checkWifi(uint32_t retries, uint32_t delayMS);
-		bool connectServer(char* host, char* port);
-		bool sendServer(char* messagePayload, server_parameter_t* server);
+		bool connectServer(server_parameter_t &server);
+		bool sendServer(String &messagePayload, server_parameter_t &server);
 		bool closeServer(void);
 		void sleep(uint8_t type);
 	
