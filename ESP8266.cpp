@@ -1,0 +1,480 @@
+/** @file ESP8266.c 
+ *  @brief Functions related with the ESP8266 WiFi module.
+ */
+#include "ESP8266.h"
+
+#ifdef WIFI_ENABLE
+
+/*************************************************************************************
+* Private prototypes
+*************************************************************************************/	
+void serial_flush(void);
+bool serial_get(char* stringChecked, uint32_t timeout, char* serialBuffer = (char*) NULL);
+
+/*************************************************************************************
+* Private enumeration
+*************************************************************************************/
+enum sleep_wakeup_t
+{
+	SLEEP = 0,
+	WAKEUP
+};
+
+/*******************************************************************************
+   ESP8266
+****************************************************************************//**
+ * @brief Constructor: set enable pin.
+ * @param void
+ * @return void
+*******************************************************************************/
+ESP8266::ESP8266(int pin)
+{
+	enablePin = pin;
+	return;
+}
+
+/*******************************************************************************
+   LISTAP
+****************************************************************************//**
+ * @brief List all the available AP.
+ * @param ap_list The AP list.
+ * @return true if connection with the AP was successful.\n
+           FALSE if could not connect.
+*******************************************************************************/
+int ESP8266::listAP(esp_wifi_config_t* ap_list, int ap_list_size)
+{
+    int n_aps = 0;
+    char serialBuffer[100];
+
+    /* Limpeza de variáveis */
+    memset(ap_list,0,sizeof(esp_wifi_config_t)*ap_list_size);
+    memset(serialBuffer,0,sizeof(serialBuffer));
+
+    /* Obtém lista de APs disponíveis, separando os parâmetros obtidos da lista */
+    serial_flush();
+    Serial.write("AT+CWLAP\r\n");
+    serial_get((char*) "\r\n", 1000, serialBuffer);
+    do
+    {
+        char* tkn = strtok(serialBuffer, "\"");
+        if(tkn)
+        {
+            /* Primeiro token está entre aspas */
+            tkn = strtok(NULL, "\"");
+            if(tkn)
+                strncpy(ap_list[n_aps].SSID, tkn, sizeof(ap_list[n_aps].SSID) - 1);
+            else
+                break;
+            
+            /* O segundo após a virgula */
+            tkn = strtok(NULL, ",");
+            if(tkn)
+                strncpy(ap_list[n_aps].signal, tkn, sizeof(ap_list[n_aps].signal) - 1);
+            else
+                break;
+            
+            /* Incrementa lista */
+            n_aps++;
+
+            if(n_aps > ap_list_size-1)
+                break;
+        }
+        else
+            break;
+
+        /* Obtém próxima rede */
+        memset(serialBuffer,0,sizeof(serialBuffer));
+        serial_get((char*) "\r\n", 100, serialBuffer);
+
+    } while(true);
+    
+    /* Caso foi descoberto pelo menos 1 ponto de acesso */
+    if(n_aps>0)
+    {
+        /* Organizar pela qualidade do sinal */
+        for(int i=1; i<n_aps; i++)
+        {
+            for(int j=0; j<n_aps-i; j++) 
+            {
+                if (atoi(ap_list[j].signal) < atoi(ap_list[j + 1].signal))
+                {
+                    esp_wifi_config_t temp = ap_list[j];
+                    ap_list[j] = ap_list[j + 1];
+                    ap_list[j + 1] = temp;
+                }
+            }
+        }
+    }
+
+    serial_flush();
+    return n_aps;
+}
+
+/*******************************************************************************
+   CONNECTAP
+****************************************************************************//**
+ * @brief Connect with the AP using the SSID and password.
+ * @param esp_wifi_config_t Configurations of the AP.
+ * @return true if connection with the AP was successful.\n
+           FALSE if could not connect.
+*******************************************************************************/
+bool ESP8266::connectAP(esp_wifi_config_t wifiConfig)
+{
+    char strBuffer[100];
+    
+    /* Desconecta do AP */
+    serial_flush();
+    Serial.write("AT+CWQAP\r\n"); // AT: Quit Acess Point
+    serial_get((char*) "OK\r\n", 100); // Valor esperado: 'OK'. Timeout: 100ms.
+    delay(100);
+    
+    sprintf(strBuffer,"AT+CWJAP_DEF=\"%s\",\"%s\"\r\n", wifiConfig.SSID, wifiConfig.password);
+    serial_flush();
+    Serial.write(strBuffer); // AT: Join Acess Point
+    serial_get((char*) "\r\n", 10000, strBuffer); // Timeout: 10s.
+    
+    return strstr(strBuffer,"WIFI CONNECTED\r\n"); // Valor esperado: 'WIFI CONNECTED'.
+}
+
+/*******************************************************************************
+   CONFIG
+****************************************************************************//**
+ * @brief Inicialization of the ESP8266 WiFi module.
+ * @param void
+ * @return true if passed sanity check.\n
+           false if opposite.
+*******************************************************************************/
+bool ESP8266::config(void)
+{
+    uint32_t delayMS = 50;
+    
+	/* Inicializa serial em 115200 baud/s */
+	Serial.end();
+	Serial.begin(115200);
+	
+    /* Reset do módulo WiFi */
+    DESATIVA_ESP;
+    delay(delayMS);
+    ATIVA_ESP;
+    /* Delay para inicialização */
+    delay(250);
+
+    /* Remove mensagem de eco da serial */
+    Serial.print("ATE0\r\n");
+    delay(delayMS);
+    
+    /* Teste de sanidade do módulo ESP8266 */
+	/* Valor esperado: 'OK'. Timeout: 100ms. */
+    serial_flush();
+    Serial.write("AT\r\n");
+    if(!serial_get((char*) "OK\r\n",100))
+        return false;
+	
+    /* Modo 'client' */
+    Serial.write("AT+CWMODE_DEF=1\r\n");
+    if(!serial_get((char*) "OK\r\n",100))
+		return false;
+	
+	/* Conexões multiplas = FALSE */
+    Serial.write("AT+CIPMUX=0\r\n");
+    if(!serial_get((char*) "OK\r\n",100))
+        return false;
+	
+	// /* Configurar modo AP */
+	// Serial.write("AT+CWSAP=\"ESP8266\",\"123\",4,0\r\n");
+    // if(!serial_get((char*) "OK\r\n",100))
+        // return false;
+	
+	// /* Inicializa modo AP */
+	// Serial.write("AT+CIPAP=\"192.168.0.101\"\r\n");
+    // if(!serial_get((char*) "OK\r\n",100))
+       // return false;
+	
+	// /* Inicializar AP */
+	// Serial.write("AT+CIPSERVER=1,1500\r\n");
+	// if(!serial_get((char*) "OK\r\n",100))
+        // return false;
+	
+	serial_flush();
+    return true;
+}
+
+/*******************************************************************************
+   CHECKWIFI
+****************************************************************************//**
+ * @brief Checks if connected with the AP.
+ * @param retries Number of times the command is sent.
+ * @param delayMS The delay between each retry, in miliseconds.
+ * @return true if connected with the AP.
+           FALSE if opposite.
+*******************************************************************************/
+bool ESP8266::checkWifi(uint32_t retries, uint32_t delayMS)
+{
+    char strBuffer[100];
+    memset(strBuffer,'\0',sizeof(strBuffer));
+    
+    /* Envia comando para verificar se conectado, pelo numero de vezes dado por 'retries'*/
+    for(uint32_t i=0;i<retries;i++) 
+    {
+        serial_flush();
+        Serial.write("AT+CWJAP_DEF?\r\n");
+        serial_get((char*) "\r\n", 100, strBuffer); // Timeout: 100ms.
+        
+        if(strstr(strBuffer,"+CWJAP_DEF:")) // Valor esperado: '+CWJAP_DEF:'.
+            return true;
+        else
+            delay(delayMS);
+    }
+    
+    return false;
+}
+
+/*******************************************************************************
+   CONNECTSERVER
+****************************************************************************//**
+ * @brief Connect the ESP8266 WiFi module to the cloud.
+ * @param host The IP or URL of the host.
+ * @param port The port of the connection.
+ * @return true if connection with the server was successful.\n
+           FALSE if oposite.
+*******************************************************************************/
+bool ESP8266::connectServer(char* host, char* port)
+{
+    char strBuffer[100];
+    sprintf(strBuffer,"AT+CIPSTART=\"TCP\",\"%s\",%s\r\n",host,port);
+    
+    /* Conecta ao servidor */
+    serial_flush();
+    Serial.write(strBuffer); //AT: Connect to the cloud.
+    return serial_get((char*) "CONNECT\r\n",1000); // Valor esperado: 'CONNECT'. Timeout: 1s.
+}
+
+/*******************************************************************************
+   SENDSERVER
+****************************************************************************//**
+ * @brief Send string data to the cloud or to the local server through the ESP8266 WiFi module.
+ * @param messagePayload The message to be sent.
+ * @param SERVER Controls settings for diferent servers:\n
+          "SERVER_WEB": Headers + payload / Parameters: 'action' & 'message' / ACK: 'success'.\n
+          "SERVER_LOCAL" & "SERVER_BACKUP": Payload only / Parameters: none / ACK: 'LOCAL: MESSAGE RECEIVED'.
+ * @param messagesAmount The number of messages to send.
+ * @return true if the ACK was received.\n
+           FALSE if connection failed or no ACK was received.
+*******************************************************************************/
+bool ESP8266::sendServer(char* messagePayload, server_parameter_t* server)
+{
+	char headers[250];
+	char AT_CIPSEND_command[25];
+	char* contentType = (char*) "application/x-www-form-urlencoded";
+	
+	/************************************* HEADER *************************************/
+	/* Formatação do cabeçalho */
+	sprintf(headers,"POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: %s\r\nContent-Length: %i\r\n\r\n",server->path, server->host,contentType,strlen(messagePayload));
+	sprintf(AT_CIPSEND_command,"AT+CIPSEND=%i\r\n",strlen(headers)+strlen(messagePayload)+4); /* The last 4 is for 'CR' + 'LF' + 'CR' + 'LF' in FOOTER */
+	
+	serial_flush();
+	Serial.write(AT_CIPSEND_command);    	/* AT: Send command */
+	serial_get((char*) ">", 100);        	/* Aguarda '>' */
+	Serial.write(headers);               	/* Headers */  
+
+    /************************************* BODY *************************************/
+	Serial.write(messagePayload);    		/* Payload */
+    
+    /************************************* FOOTER *************************************/
+	Serial.write("\r\n\r\n");             	/* End of HTTP POST: 'CR' + 'LF' + 'CR' + 'LF' */ 
+
+    return serial_get((char*) "SEND OK", 1000); // Valor esperado: variável 'confirmationString'. Timeout: 1s.
+}
+
+/*******************************************************************************
+   CLOSESERVER
+****************************************************************************//**
+ * @brief Close the ESP8266 WiFi module connection with the cloud.
+ * @param void
+ * @return true if no problems occured.\n
+           FALSE if could not close connection.
+*******************************************************************************/
+bool ESP8266::closeServer(void)
+{
+    serial_flush();
+    Serial.write("AT+CIPCLOSE\r\n");
+    return serial_get((char*) "CLOSED\r\n", 100); // Valor esperado: "CLOSED". Timeout: 100ms.
+}
+
+/*******************************************************************************
+   SLEEP
+****************************************************************************//**
+ * @brief Puts the ESP8266 WiFi module in deep sleep / Wakeup.
+ * @param mode Two modes:\n
+          "SLEEP": Enters deep sleep.\n
+          "WAKEUP": Wakes up the module.
+ * @return true if connected with the WiFi in "WAKEUP" mode.\n
+           FALSE if not connected.
+*******************************************************************************/
+void ESP8266::sleep(uint8_t type)
+{
+    /* Dois modos: "SLEEP" entrar em deep-sleep. "WAKEUP" acordar com sinal do GPIO */
+    switch(type)
+    {
+        case SLEEP:
+        {
+            /* Entra em soft-sleep */
+            /* Caso não aceite comando, força pino de reset */
+            serial_flush();
+            Serial.write("AT+GSLP=0\r\n");
+            if(!serial_get((char*) "OK\r\n", 100));
+                DESATIVA_ESP;
+        }
+        break;
+
+        case WAKEUP:
+        {
+            DESATIVA_ESP;
+            delay(50);
+            ATIVA_ESP;
+            delay(250);
+
+            /* Remove mensagem de eco da serial */
+            Serial.write("ATE0\r\n");
+            delay(50);
+        }
+        break;
+    }
+}
+
+// /*******************************************************************************
+   // ESP_GET_TIME
+// ****************************************************************************//**
+ // * @brief This function gets the online time from the WEB.
+ // * @param dayTimePointer Pointer to which the timestamp will be stored, in the form yyMMddHHmmss.
+ // * @return true if timestamp is valid.
+           // FALSE if could not connect with the time server.
+// *******************************************************************************/
+// bool ESP8266::ESP_get_time(uint8_t *dayTimePointer)
+// {  
+    // char host[4][25] = {"time.nist.gov",     //Server: time.nist.gov.
+                        // "time-nw.nist.gov",  //Server: time-nw.nist.gov.
+                        // "time-a.nist.gov",   //Server: time-a.nist.gov.
+                        // "time-b.nist.gov"};  //Server: time-b.nist.gov.
+    
+    // char AT_CIPSTART_command[50] = {'\0'};
+    // char* strConfirmation;
+    // char serialBuffer[100] = {'\0'};
+    // bool_t ESP_OK_status = FALSE;
+    
+    // for(uint8_t i=0;i<4;i++)
+    // {
+        // /* Conectar ao servidor. Porta padrão: 13 */
+        // sprintf(AT_CIPSTART_command,"AT+CIPSTART=\"TCP\",\"%s\",13\r\n",host[i]);
+        // serial_flush(UART_2);
+        // serial_send(UART_2, AT_CIPSTART_command);
+        // serial_get("CLOSED\r\n", serialBuffer, 1000, UART_2); // Valor esperado: "CLOSED". Timeout: 1s.
+        
+        // /* Verifica se servidor enviou timestamp */
+        // strConfirmation = strstr(serialBuffer,"+IPD");
+        // if(strConfirmation)
+        // {
+            // /* Coloca string no formato AAMMDDhhmmss */
+            // strConfirmation += 15;
+            // for (uint8_t j=0;j<6;j++)
+            // {
+                // *dayTimePointer = *strConfirmation;
+                // dayTimePointer++;
+                // strConfirmation++;
+                // *dayTimePointer = *strConfirmation;
+                // dayTimePointer++;  
+                // strConfirmation += 2;
+            // }
+            // *dayTimePointer = '\0';
+            // ESP_OK_status = true;
+            // break;
+        // }
+        // else
+            // ESP_close_connection();
+        
+        // memset(serialBuffer,'\0',sizeof(serialBuffer));
+    // }
+    
+    // /* ERRO: pisca 4 vezes, longo, mantém aceso */
+    // if (!ESP_OK_status)
+    // {
+        // for(uint8_t i=0;i<4;i++)
+        // {
+            // LED_TurnOffLed(VERMELHO);
+            // DelayMs(300);
+            // LED_TurnOnLed(VERMELHO);
+            // DelayMs(300);
+        // }
+    // }
+    // else
+        // LED_TurnOffLed(VERMELHO);
+    
+    // return ESP_OK_status;
+// }
+
+/************************************************************************************
+* serial_flush
+*
+* This function flushes the serial buffer.
+*
+************************************************************************************/
+void serial_flush(void)
+{
+	/* Obtém bytes disponíveis */
+	while (Serial.available()) 
+		Serial.read();
+
+	return;
+}
+
+/************************************************************************************
+* serial_get
+*
+* This function gets messages from serial, during a certain timeout.
+*
+************************************************************************************/
+bool serial_get(char* stringChecked, uint32_t timeout, char* serialBuffer)
+{
+	char* u8buffer;
+    char* u8bufferInit;
+    char u8tempBuffer[100];
+	uint32_t u32counter=0;
+	
+	/* Se o ponteiro é não NULO, recebe endereço de serialBuffer */
+    /* Ou se for NULO, recebe endereço de buffer local */
+    if(serialBuffer)
+        u8buffer = serialBuffer;
+    else
+        u8buffer = u8tempBuffer;
+	
+	/* Recebe endereço da primeira posição */
+    u8bufferInit = u8buffer;
+	
+	/* Limpa o primeiro byte do buffer */
+    *u8buffer = '\0';
+	
+	while(true)
+    {
+		/* Enquanto houver dados no buffer, receber e comparar com a string a ser checada */
+		while(Serial.available())
+		{
+			char inChar = (char)Serial.read();
+			*u8buffer = inChar;  u8buffer++;
+			*u8buffer = '\0';
+			
+			if(strstr(u8bufferInit,stringChecked))
+				return true;
+			
+			if(strlen(u8bufferInit)>=100)
+				u8buffer = u8bufferInit;
+		}
+		
+		/* Incrementa contador  de timeout */
+		u32counter++;
+		if (u32counter>=timeout*1000)
+			return false;
+		delayMicroseconds(1);
+	}
+}
+
+#endif  //WIFI_ENABLE
