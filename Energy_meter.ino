@@ -2,21 +2,31 @@
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
 
-#define ESP_ENABLE        2
-#define ESP_AP_LIST_SIZE 10
+/*************************************************************************************
+* Private macros
+*************************************************************************************/
+/* Modulo WiFi ESP8266 */
+#define ESP_ENABLE_PIN      2
+#define ESP_AP_LIST_SIZE    10
+#define ESP_SLEEP_TIMEOUT   15  /* Minutes */
 
-#define INPUT1      A0
-#define INPUT2      A1
-#define INPUT3      A2
+/* Entradas Analógicas */
+#define INPUT1      A1
+#define INPUT2      A2
+#define INPUT3      A3
 
+/* Enable dos Sensores */
 #define PWR1        3
 #define PWR2        4
 
-//#define DEBUG
-
+/*************************************************************************************
+* Private variables
+*************************************************************************************/
 /* Módulo WiFi ESP8266 */
 /* Pino de Enable = 2 */
-ESP8266 esp(ESP_ENABLE);
+ESP8266 esp(ESP_ENABLE_PIN);
+ESP8266::server_parameter_t server;
+ESP8266::esp_wifi_config_t wifi;
 
 /* LCD I2C */
 /* ADDR = 0x27 */
@@ -27,10 +37,9 @@ int value1;
 int value2;
 int value3;
 
-ESP8266::server_parameter_t server;
-ESP8266::esp_wifi_config_t wifi;
-
-/* Valores Iniciais */
+/*************************************************************************************
+* Private functions
+*************************************************************************************/
 void setup()
 {
   /* Entradas Analógicas */
@@ -47,13 +56,15 @@ void setup()
   if(!esp.config())
   {
     lcd.clear();
-    lcd.print("ESP: CONFIG ERROR");
+    lcd.print("ESP CONFIG:"); lcd.setCursor(0,1);
+    lcd.print("ERROR");
     while(true) {};
   }
   else
   {
     lcd.clear();
-    lcd.print("ESP: CONFIG OK");
+    lcd.print("ESP CONFIG:"); lcd.setCursor(0,1);
+    lcd.print("OK");
   }
 
   wifi.SSID = "WiFi WaFer";
@@ -66,13 +77,15 @@ void setup()
   if(!esp.connectAP(wifi))
   {
     lcd.clear();
-    lcd.print("ESP: CONNECT ERROR");
+    lcd.print("ESP CONNECT AP:"); lcd.setCursor(0,1);
+    lcd.print("ERROR");
     while(true) {};
   }
   else
   {
     lcd.clear();
-    lcd.print("ESP: CONNECT OK");
+    lcd.print("ESP CONNECT AP:"); lcd.setCursor(0,1);
+    lcd.print("OK");
   }
   
 //  ESP8266::esp_wifi_config_t wifiList[ESP_AP_LIST_SIZE];
@@ -84,7 +97,6 @@ void setup()
 
 void loop() 
 {
-#ifndef DEBUG
   /* Liga Alimentação dos sensores */
   digitalWrite(PWR1,HIGH);
   digitalWrite(PWR2,HIGH);
@@ -99,37 +111,38 @@ void loop()
   digitalWrite(PWR1,LOW);
   digitalWrite(PWR2,LOW);
 
-  //lcd.clear();
-  //lcd.print("Valor 1 = "); lcd.print(value1); lcd.setCursor(0,1);
-  //lcd.print("Valor 2 = "); lcd.print(value2); 
-
-  
-#endif
-
   if(esp.connectServer(server))
   {
-      String payload;
-      payload  = "field1=" + String(value1) + "&";
-      payload += "field2=" + String(value2);
+    lcd.clear();
+    lcd.print("ESP SERVER:"); lcd.setCursor(0,1);
+    lcd.print("CONNECTED");
+  
+    String payload;
+    payload  = "field1=" + String(value1) + "&";
+    payload += "field2=" + String(value2);
+    
+    if(esp.sendServer(payload, server))
+    {
       lcd.clear();
-      lcd.print("Thing: Connected OK");
-      if(esp.sendServer(payload, server))
-      {
-          lcd.clear();
-          lcd.print("Thing: Send OK");
-      }
-      else
-      {
-          lcd.clear();
-          lcd.print("Thing: Send ERROR");
-      }
+      lcd.print("ESP SERVER:"); lcd.setCursor(0,1);
+      lcd.print("SEND OK");
+    }
+    else
+    {
+      lcd.clear();
+      lcd.print("ESP SERVER:"); lcd.setCursor(0,1);
+      lcd.print("SEND ERROR");
+    }
   }
   else
   {
-      lcd.clear();
-      lcd.print("Thing: Connected ERROR");
+    lcd.clear();
+    lcd.print("ESP SERVER:"); lcd.setCursor(0,1);
+    lcd.print("NOT CONNECTED");
   }
-  delay(60000);
+
+  /* Período de publicação */
+  delay((uint32_t) ESP_SLEEP_TIMEOUT*60*1000); /* milisegundos */
 }
 
 

@@ -3,8 +3,7 @@
  */
 #include "ESP8266.h"
 
-#ifdef WIFI_ENABLE
-
+#ifdef ESP8266_ENABLE
 /*************************************************************************************
 * Private prototypes
 *************************************************************************************/	
@@ -488,4 +487,4 @@ bool serial_get(const char* stringChecked, uint32_t timeout, char* serialBuffer)
   	}
 }
 
-#endif  //WIFI_ENABLE
+#endif  //ESP8266_ENABLE

@@ -17,17 +17,12 @@
 /*************************************************************************************
 * Public macros
 *************************************************************************************/
-#define WIFI_ENABLE     /**< Enable/Disable the WiFi ESP8266 module, which transmits the packages to the servers */        
+#define ESP8266_ENABLE     /**< Enable/Disable the WiFi ESP8266 module, which transmits the packages to the servers */        
         
-#ifdef WIFI_ENABLE  
-  #define WIFI_SLEEP       /**< Enable/Disable the module entering deep-sleep */
-#else
-  #warning WiFi desabilitado
-#endif /* WIFI_ENABLE */
-
-
-#define DESATIVA_ESP	digitalWrite(enablePin,LOW);
-#define ATIVA_ESP 		digitalWrite(enablePin,HIGH);
+#ifdef ESP8266_ENABLE  
+  #define ESP_SLEEP       /**< Enable/Disable the module entering deep-sleep */
+  #define DESATIVA_ESP	digitalWrite(enablePin,LOW);
+  #define ATIVA_ESP 		digitalWrite(enablePin,HIGH);
 
 class ESP8266
 {
@@ -90,18 +85,11 @@ class ESP8266
 		* Private variables
 		*************************************************************************************/
 		int enablePin;
-		
-		
-		
-		
 };
 
-/*************************************************************************************
-* Public variables
-*************************************************************************************/
-/* Vari�veis de status */
-//extern bool_t status_awake_ESP;        /**< Flag to identify if the module is asleep/awake */   
-//extern server_parameter_t ServerParameter[4];  /**< Struct that holds the parameters of the servers */
+#else
+  #warning ESP8266 desabilitado
+#endif /* ESP8266_ENABLE */
 
 /** @} */
 #endif /* _ESP8266_H_ */
