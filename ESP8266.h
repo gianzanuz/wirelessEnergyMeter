@@ -20,13 +20,38 @@
 #define ESP8266_ENABLE     /**< Enable/Disable the WiFi ESP8266 module, which transmits the packages to the servers */        
         
 #ifdef ESP8266_ENABLE  
+  #define DESATIVA_ESP  digitalWrite(enablePin,LOW);
+  #define ATIVA_ESP     digitalWrite(enablePin,HIGH);
+  
   #define ESP_SLEEP       /**< Enable/Disable the module entering deep-sleep */
-  #define DESATIVA_ESP	digitalWrite(enablePin,LOW);
-  #define ATIVA_ESP 		digitalWrite(enablePin,HIGH);
+
+  #define ESP_SERVER      /**< Enable/Disable ESP8266 as server */
+  #ifdef ESP_SERVER
+    #define ESP_SERVER_SSID       "ESP8266_AP"
+    #define ESP_SERVER_PASSWORD   "1234"
+    #define ESP_SERVER_IP         "192.168.1.1"
+    #define ESP_SERVER_PORT       "80"
+  #endif
+
+/*************************************************************************************
+* Public prototypes
+*************************************************************************************/  
+extern void serial_flush(void);
+extern bool serial_get(const char* stringChecked, uint32_t timeout, char* serialBuffer = (char*) NULL);
 
 class ESP8266
 {
 	public:
+    /*************************************************************************************
+    * Public enumeration
+    *************************************************************************************/
+    enum HTML_Method
+    {
+      HTML_GET = 0,
+      HTML_POST,
+      HTML_RESPONSE_OK
+    };
+ 
 		/*************************************************************************************
 		* Public struct
 		*************************************************************************************/
@@ -44,28 +69,6 @@ class ESP8266
 			String port;
 		};
 
-//char* HTML_PAGE = (char*)
-//"<!DOCTYPE html>\r\n\
-//<html>\r\n\
-//<h1>Conex�o ao Ponto de Acesso WiFi</h1>\r\n\
-//<h3>Giancarlo Zanuz</h3>\r\n\
-//<body>\r\n\
-//<form method=\"post\">\r\n\
-//	<div>\r\n\
-//		<label for=\"name\">Name:</label>\r\n\
-//		<input type=\"text\" id=\"name\" name=\"user_name\" />\r\n\
-//	</div>\r\n\
-//	<div>\r\n\
-//		<label for=\"senha\">Senha:</label>\r\n\
-//		<input type=\"password\" id=\"senha\" name=\"user_mail\" />\r\n\
-//	</div>\r\n\
-//	<div class=\"button\">\r\n\
-//		<button type=\"submit\">Send your message</button>\r\n\
-//	</div>\r\n\
-//</form>\r\n\
-//</body>\r\n\
-//</html>\r\n";
-	
 		/*************************************************************************************
 		* Public prototypes
 		*************************************************************************************/
@@ -75,11 +78,10 @@ class ESP8266
 		bool config(void);
 		bool checkWifi(uint32_t retries, uint32_t delayMS);
 		bool connectServer(server_parameter_t &server);
-		bool sendServer(String &messagePayload, server_parameter_t &server);
+		bool sendServer(const char* messagePayload, const char* messageHeaders, server_parameter_t &server, HTML_Method method);
 		bool closeServer(void);
 		void sleep(uint8_t type);
 	
-
 	private:
 		/*************************************************************************************
 		* Private variables
@@ -88,7 +90,7 @@ class ESP8266
 };
 
 #else
-  #warning ESP8266 desabilitado
+  #warning WiFi desabilitado
 #endif /* ESP8266_ENABLE */
 
 /** @} */
