@@ -31,17 +31,17 @@ ESP8266::ESP8266(int pin)
    LISTAP
 ****************************************************************************//**
  * @brief List all the available AP.
- * @param ap_list The AP list.
+ * @param apList The AP list.
  * @return true if connection with the AP was successful.\n
            FALSE if could not connect.
 *******************************************************************************/
-int ESP8266::listAP(esp_wifi_config_t* ap_list, int ap_list_size)
+int ESP8266::getAPList(esp_AP_parameter_t* apList, int apList_size)
 {
     int n_aps = 0;
     char serialBuffer[100];
 
     /* Limpeza de vari�veis */
-    memset(ap_list,0,sizeof(esp_wifi_config_t)*ap_list_size);
+    memset(apList,0,sizeof(esp_AP_parameter_t)*apList_size);
     memset(serialBuffer,0,sizeof(serialBuffer));
 
     /* Obt�m lista de APs dispon�veis, separando os par�metros obtidos da lista */
@@ -56,23 +56,23 @@ int ESP8266::listAP(esp_wifi_config_t* ap_list, int ap_list_size)
             /* Primeiro token est� entre aspas */
             tkn = strtok(NULL, "\"");
             if(tkn)
-                ap_list[n_aps].SSID = String(tkn);
-                //strncpy(ap_list[n_aps].SSID, tkn, sizeof(ap_list[n_aps].SSID) - 1);
+                apList[n_aps].SSID = String(tkn);
+                //strncpy(apList[n_aps].SSID, tkn, sizeof(apList[n_aps].SSID) - 1);
             else
                 break;
             
             /* O segundo ap�s a virgula */
             tkn = strtok(NULL, ",");
             if(tkn)
-                ap_list[n_aps].signal = String(tkn);
-                //strncpy(ap_list[n_aps].signal, tkn, sizeof(ap_list[n_aps].signal) - 1);
+                apList[n_aps].signal = String(tkn);
+                //strncpy(apList[n_aps].signal, tkn, sizeof(apList[n_aps].signal) - 1);
             else
                 break;
             
             /* Incrementa lista */
             n_aps++;
 
-            if(n_aps > ap_list_size-1)
+            if(n_aps > apList_size-1)
                 break;
         }
         else
@@ -92,11 +92,11 @@ int ESP8266::listAP(esp_wifi_config_t* ap_list, int ap_list_size)
         {
             for(int j=0; j<n_aps-i; j++) 
             {
-                if (ap_list[j].signal.toInt() < ap_list[j + 1].signal.toInt())
+                if (apList[j].signal.toInt() < apList[j + 1].signal.toInt())
                 {
-                    esp_wifi_config_t temp = ap_list[j];
-                    ap_list[j] = ap_list[j + 1];
-                    ap_list[j + 1] = temp;
+                    esp_AP_parameter_t temp = apList[j];
+                    apList[j] = apList[j + 1];
+                    apList[j + 1] = temp;
                 }
             }
         }
@@ -107,49 +107,68 @@ int ESP8266::listAP(esp_wifi_config_t* ap_list, int ap_list_size)
 }
 
 /*******************************************************************************
-   CONNECTAP
+   setAP
 ****************************************************************************//**
  * @brief Connect with the AP using the SSID and password.
  * @param esp_wifi_config_t Configurations of the AP.
  * @return true if connection with the AP was successful.\n
            FALSE if could not connect.
 *******************************************************************************/
-bool ESP8266::connectAP(esp_wifi_config_t &wifiConfig)
+bool ESP8266::setAP(esp_mode_t &mode, const esp_AP_parameter_t &AP)
 {
-    char strBuffer[50];
-    
-    /* AT: Desconecta do AP */
-    serial_flush();
-    Serial.write("AT+CWQAP\r\n");
-    serial_get((char*) "OK\r\n", 100); /* timeout: 100ms */
-    delay(100);
+    char strBuffer[100];
 
-    /* AT: Connectar com AP */
-    serial_flush();
-    sprintf(strBuffer, "AT+CWJAP_DEF=\"%s\",\"%s\"\r\n", wifiConfig.SSID.c_str(), wifiConfig.password.c_str());
-    Serial.write(strBuffer); 
-    serial_get((char*) "\r\n", 10000, strBuffer); /* timeout: 10s */
+    switch(mode)
+    {
+      case ESP_CLIENT_MODE:
+      {
+        /* AT: Desconecta do AP */
+        serial_flush();
+        Serial.write("AT+CWQAP\r\n");
+        serial_get((char*) "OK\r\n", 100); /* timeout: 100ms */
+        delay(100);
     
-    return strstr(strBuffer,"WIFI CONNECTED\r\n"); // Valor esperado: 'WIFI CONNECTED'.
+        /* AT: Connectar com AP */
+        serial_flush();
+        sprintf(strBuffer, "AT+CWJAP_DEF=\"%s\",\"%s\"\r\n", AP.SSID.c_str(), AP.password.c_str());
+        Serial.write(strBuffer); 
+        serial_get((char*) "\r\n", 10000, strBuffer); /* timeout: 10s */
+        
+        return strstr(strBuffer,"WIFI CONNECTED\r\n"); // Valor esperado: 'WIFI CONNECTED'.
+      } break;
+      
+      case ESP_SERVER_MODE:
+      {    
+        /* Configurar modo AP */
+        sprintf(strBuffer, "AT+CWSAP_DEF=\"%s\",\"%s\",6,0\r\n", AP.SSID.c_str(), AP.password.c_str());
+        Serial.write(strBuffer);
+        return serial_get((char*) "OK\r\n",100);    
+      } break;
+      
+      default:
+        return false;
+      break;
+    }
 }
 
 /*******************************************************************************
-   CONFIG
+   config
 ****************************************************************************//**
  * @brief Inicialization of the ESP8266 WiFi module.
  * @param void
  * @return true if passed sanity check.\n
            false if opposite.
 *******************************************************************************/
-bool ESP8266::config(void)
+bool ESP8266::config(esp_mode_t &mode)
 {
+    char strBuffer[100];
     uint32_t delayMS = 50;
       
   	/* Inicializa serial em 115200 baud/s */
   	Serial.end();
   	Serial.begin(115200);
   	
-    /* Reset do m�dulo WiFi */
+    /* Reset do módulo WiFi */
     DESATIVA_ESP;
     delay(delayMS);
     ATIVA_ESP;
@@ -166,44 +185,19 @@ bool ESP8266::config(void)
     Serial.write("AT\r\n");
     if(!serial_get((char*) "OK\r\n",100))
         return false;
-	
-#ifdef ESP_SERVER
-    /* Modo 'client' & 'server' */
-    Serial.write("AT+CWMODE_DEF=2\r\n");
-#else
-    /* Modo 'client' apenas */
-    Serial.write("AT+CWMODE_DEF=1\r\n");
-#endif
-    if(!serial_get((char*) "OK\r\n",100))
-		    return false;
 
-	  /* Conexoes multiplas = TRUE */
+    /* Conexoes multiplas = TRUE */
     Serial.write("AT+CIPMUX=1\r\n");
     if(!serial_get((char*) "OK\r\n",100))
         return false;
 
-#ifdef ESP_SERVER
-    char strBuffer[100];
+    /* Define modo de operação */
+    /* 'client' / 'server' / 'client' & 'server' */
+    sprintf(strBuffer, "AT+CWMODE_DEF=%d\r\n", mode);
+    Serial.write(strBuffer);
+    if(!serial_get((char*) "OK\r\n",100))
+	      return false;
 
-	  /* Configurar modo AP */
-    sprintf(strBuffer, "AT+CWSAP_DEF=\"%s\",\"%s\",6,0\r\n", ESP_SERVER_SSID, ESP_SERVER_PASSWORD);
-	  Serial.write(strBuffer);
-    if(!serial_get((char*) "OK\r\n",100))
-      return false;
-	
-	  /* Inicializa modo AP */
-    sprintf(strBuffer, "AT+CIPAP=\"%s\"\r\n", ESP_SERVER_IP);
-	  Serial.write(strBuffer);
-    if(!serial_get((char*) "OK\r\n",100))
-       return false;
-	
-	  /* Inicializar AP */
-    sprintf(strBuffer, "AT+CIPSERVER=1,%s\r\n", ESP_SERVER_PORT);
-	  Serial.write(strBuffer);
-	  if(!serial_get((char*) "OK\r\n",100))
-      return false;
-#endif
-  
 	  serial_flush();
     return true;
 }
@@ -238,38 +232,63 @@ bool ESP8266::checkWifi(uint32_t retries, uint32_t delayMS)
 }
 
 /*******************************************************************************
-   CONNECTSERVER
+   CONNECTurl
 ****************************************************************************//**
  * @brief Connect the ESP8266 WiFi module to the cloud.
  * @param host The IP or URL of the host.
  * @param port The port of the connection.
- * @return true if connection with the server was successful.\n
+ * @return true if connection with the url was successful.\n
            FALSE if oposite.
 *******************************************************************************/
-bool ESP8266::connectServer(server_parameter_t &server)
+bool ESP8266::connect(esp_mode_t &mode, esp_URL_parameter_t &url)
 {
-    String strBuffer;
-    strBuffer = "AT+CIPSTART=0,\"TCP\",\"" + server.host + "\"," + server.port + "\r\n";
-    
-    /* Conecta ao servidor */
-    serial_flush();
-    Serial.write(strBuffer.c_str()); //AT: Connect to the cloud.
-    return serial_get((char*) "CONNECT\r\n",1000); // Valor esperado: 'CONNECT'. Timeout: 1s.
+    char strBuffer[100];
+
+    switch(mode)
+    {
+      case ESP_CLIENT_MODE:
+      {
+        sprintf(strBuffer, "AT+CIPSTART=0,\"TCP\",\"%s\",%s\r\n", url.host.c_str(), url.port.c_str());
+        
+        /* Conecta ao servidor */
+        serial_flush();
+        Serial.write(strBuffer); //AT: Connect to the cloud.
+        return serial_get((char*) "CONNECT\r\n",1000); // Valor esperado: 'CONNECT'. Timeout: 1s.
+      } break;
+
+      case ESP_SERVER_MODE:
+      {
+          /* Inicializa modo AP */
+          sprintf(strBuffer, "AT+CIPAP=\"%s\"\r\n", url.host.c_str());
+          Serial.write(strBuffer);
+          if(!serial_get((char*) "OK\r\n",100))
+             return false;
+        
+          /* Inicializar AP */
+          sprintf(strBuffer, "AT+CIPSERVER=1,%s\r\n", url.port.c_str());
+          Serial.write(strBuffer);
+          return serial_get((char*) "OK\r\n",100);
+      } break;
+
+      default:
+          return false;
+      break;
+    }
 }
 
 /*******************************************************************************
-   SENDSERVER
+   SENDurl
 ****************************************************************************//**
- * @brief Send string data to the cloud or to the local server through the ESP8266 WiFi module.
+ * @brief Send string data to the cloud or to the local url through the ESP8266 WiFi module.
  * @param messagePayload The message to be sent.
- * @param SERVER Controls settings for diferent servers:\n
-          "SERVER_WEB": Headers + payload / Parameters: 'action' & 'message' / ACK: 'success'.\n
-          "SERVER_LOCAL" & "SERVER_BACKUP": Payload only / Parameters: none / ACK: 'LOCAL: MESSAGE RECEIVED'.
+ * @param url Controls settings for diferent urls:\n
+          "url_WEB": Headers + payload / urls: 'action' & 'message' / ACK: 'success'.\n
+          "url_LOCAL" & "url_BACKUP": Payload only / urls: none / ACK: 'LOCAL: MESSAGE RECEIVED'.
  * @param messagesAmount The number of messages to send.
  * @return true if the ACK was received.\n
            FALSE if connection failed or no ACK was received.
 *******************************************************************************/
-bool ESP8266::sendServer(const char* messagePayload, const char* messageHeaders, server_parameter_t &server, HTML_Method method)
+bool ESP8266::send(const char* messagePayload, const char* messageHeaders, esp_URL_parameter_t &url, HTML_method_t method)
 {
   	String headers;
   	String espSend;
@@ -280,11 +299,11 @@ bool ESP8266::sendServer(const char* messagePayload, const char* messageHeaders,
     {
       case HTML_GET:
       {
-        headers  = "GET " + server.path + " HTTP/1.1" + "\r\n";
+        headers  = "GET " + url.path + " HTTP/1.1" + "\r\n";
       } break;
       case HTML_POST:
       {
-        headers  = "POST " + server.path + " HTTP/1.1" + "\r\n";
+        headers  = "POST " + url.path + " HTTP/1.1" + "\r\n";
       } break;
       case HTML_RESPONSE_OK:
       {
@@ -292,9 +311,9 @@ bool ESP8266::sendServer(const char* messagePayload, const char* messageHeaders,
       } break;
     }
     
-    headers += "Host: " + server.host + "\r\n";
+    headers += "Host: " + url.host + "\r\n";
     if(strlen(messageHeaders))
-      headers += messageHeaders;
+      headers += String(messageHeaders);
     //headers += "Connection: close\r\n";  
     headers += "Content-Length: " + String(strlen(messagePayload)) + String("\r\n\r\n");
 
@@ -317,14 +336,14 @@ bool ESP8266::sendServer(const char* messagePayload, const char* messageHeaders,
 }
 
 /*******************************************************************************
-   CLOSESERVER
+   CLOSEurl
 ****************************************************************************//**
  * @brief Close the ESP8266 WiFi module connection with the cloud.
  * @param void
  * @return true if no problems occured.\n
            FALSE if could not close connection.
 *******************************************************************************/
-bool ESP8266::closeServer(void)
+bool ESP8266::close(void)
 {
     serial_flush();
     Serial.write("AT+CIPCLOSE=0\r\n");
@@ -378,14 +397,14 @@ void ESP8266::sleep(uint8_t type)
  // * @brief This function gets the online time from the WEB.
  // * @param dayTimePointer Pointer to which the timestamp will be stored, in the form yyMMddHHmmss.
  // * @return true if timestamp is valid.
-           // FALSE if could not connect with the time server.
+           // FALSE if could not connect with the time url.
 // *******************************************************************************/
 // bool ESP8266::ESP_get_time(uint8_t *dayTimePointer)
 // {  
-    // char host[4][25] = {"time.nist.gov",     //Server: time.nist.gov.
-                        // "time-nw.nist.gov",  //Server: time-nw.nist.gov.
-                        // "time-a.nist.gov",   //Server: time-a.nist.gov.
-                        // "time-b.nist.gov"};  //Server: time-b.nist.gov.
+    // char host[4][25] = {"time.nist.gov",     //url: time.nist.gov.
+                        // "time-nw.nist.gov",  //url: time-nw.nist.gov.
+                        // "time-a.nist.gov",   //url: time-a.nist.gov.
+                        // "time-b.nist.gov"};  //url: time-b.nist.gov.
     
     // char AT_CIPSTART_command[50] = {'\0'};
     // char* strConfirmation;

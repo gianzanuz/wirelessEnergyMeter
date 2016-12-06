@@ -1,6 +1,8 @@
 #include "ESP8266.h"
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
+#include <EEPROM.h>
+#include <MemoryFree.h>
 
 /*************************************************************************************
 * Private macros
@@ -10,16 +12,9 @@
 #define ESP_AP_LIST_SIZE    10
 #define ESP_SLEEP_TIMEOUT   15  /* Minutes */
 
-/* Entradas Analógicas */
-#define INPUT1      A1
-#define INPUT2      A2
-#define INPUT3      A3
-
-/* Enable dos Sensores */
-#define PWR1        3
-#define PWR2        4
-
-//#define ENABLE
+/* Chave bipolar */
+#define SWT1        3
+#define SWT2        4
 
 /* Salva páginas HTML na memória de programa */
 const char HTML_PAGE[3][300] PROGMEM = {
@@ -34,18 +29,13 @@ const char HTML_PAGE[3][300] PROGMEM = {
 /* Módulo WiFi ESP8266 */
 /* Pino de Enable = 2 */
 ESP8266 esp(ESP_ENABLE_PIN);
-ESP8266::server_parameter_t client;
-ESP8266::server_parameter_t server;
-ESP8266::esp_wifi_config_t wifi;
+ESP8266::esp_mode_t espMode;
+ESP8266::esp_URL_parameter_t espUrl;
+ESP8266::esp_AP_parameter_t espAp;
 
 /* LCD I2C */
 /* ADDR = 0x27 */
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-
-/* Valores dos sensores */
-int value1;
-int value2;
-int value3;
 
 /*************************************************************************************
 * Public prototypes
@@ -58,106 +48,167 @@ bool serial_get(const char* stringChecked, uint32_t timeout, char* serialBuffer 
 *************************************************************************************/
 void setup()
 {
-  /* Entradas Analógicas */
-  pinMode(INPUT1, INPUT);
-  pinMode(INPUT2, INPUT);
-  pinMode(INPUT3, INPUT);
-
-  /* Saídas de Alimentação */
-  pinMode(PWR1, OUTPUT);
-  pinMode(PWR2, OUTPUT);
-
   lcd.begin();
 
-  if(!esp.config())
+  lcd.clear();
+  lcd.print(F("FREE MEMORY:")); lcd.setCursor(0,1);
+  lcd.print(freeMemory());
+  delay(1000);
+  
+  /* Switch para inicialização do ESP em modo 'client' ou 'url' */
+  pinMode(SWT1, INPUT_PULLUP);
+  pinMode(SWT2, INPUT_PULLUP);
+  if(digitalRead(SWT1))
   {
     lcd.clear();
-    lcd.print("ESP CONFIG:"); lcd.setCursor(0,1);
-    lcd.print("ERROR");
+    lcd.print(F("ESP MODE:")); lcd.setCursor(0,1);
+    lcd.print(F("CLIENT"));
+    delay(1000);
+    
+    espMode = ESP8266::ESP_CLIENT_MODE;
+    espAp.SSID =     ESP_CLIENT_SSID;
+    espAp.password = ESP_CLIENT_PASSWORD;
+    espUrl.host =    ESP_CLIENT_IP_DEFAULT;
+    espUrl.path =    ESP_CLIENT_PATH_DEFAULT;
+    espUrl.port =    ESP_CLIENT_PORT_DEFAULT;
+
+    /* Obtém AP da EEPROM, caso haja */
+    if(EEPROM_read_AP(espAp))
+    {
+        lcd.clear();
+        lcd.print(F("EEPROM FOUND:")); lcd.setCursor(0,1);
+        lcd.print(F("AP"));
+        delay(1000);
+
+        lcd.clear();
+        lcd.print(F("SSID: ")); lcd.print(espAp.SSID); lcd.setCursor(0,1);
+        lcd.print(F("pass: ")); lcd.print(espAp.password);
+        delay(1000);
+    }
+    else
+    {
+        lcd.clear();
+        lcd.print(F("EEPROM NOT FOUND:")); lcd.setCursor(0,1);
+        lcd.print(F("AP"));
+        delay(1000);
+    }
+  }
+  else
+  {
+    lcd.clear();
+    lcd.print(F("ESP MODE:")); lcd.setCursor(0,1);
+    lcd.print(F("SERVER"));
+    delay(1000);
+    
+    espMode = ESP8266::ESP_SERVER_MODE;
+    espAp.SSID =     ESP_SERVER_SSID;
+    espAp.password = ESP_SERVER_PASSWORD;
+    espUrl.host =    ESP_SERVER_IP_DEFAULT;
+    espUrl.path =    ESP_SERVER_PATH_DEFAULT;
+    espUrl.port =    ESP_SERVER_PORT_DEFAULT;
+  }
+    
+  /* Configuração inicial do ESP */
+  if(!esp.config(espMode))
+  {
+    lcd.clear();
+    lcd.print(F("ESP CONFIG:")); lcd.setCursor(0,1);
+    lcd.print(F("ERROR"));
     while(true) {};
   }
   else
   {
     lcd.clear();
-    lcd.print("ESP CONFIG:"); lcd.setCursor(0,1);
-    lcd.print("OK");
+    lcd.print(F("ESP CONFIG:")); lcd.setCursor(0,1);
+    lcd.print(F("OK"));
   }
 
-  client.host = "api.thingspeak.com";
-  client.path = "/update";
-  client.port = "80";
-
-  server.host = ESP_SERVER_IP;
-  server.path = "";
-  server.port = ESP_SERVER_PORT;
-}
-
-void loop() 
-{
-
-#ifdef ENABLE
-  /* Liga Alimentação dos sensores */
-  digitalWrite(PWR1,HIGH);
-  digitalWrite(PWR2,HIGH);
-  delay(250);
-
-  /* Leitura dos valores */
-  value1 = analogRead(INPUT1);
-  value2 = analogRead(INPUT2);
-  value3 = analogRead(INPUT3);
-
-  /* Desliga Alimentação dos sensores */
-  digitalWrite(PWR1,LOW);
-  digitalWrite(PWR2,LOW);
-
-  if(esp.checkWifi(5, 100))
+  /* Ajuste do Access Point */
+  if(!esp.setAP(espMode, espAp))
   {
     lcd.clear();
-    lcd.print("ESP CONNECT AP:"); lcd.setCursor(0,1);
-    lcd.print("OK");
-
-    if(esp.connectServer(client))
-    {
-      lcd.clear();
-      lcd.print("ESP SERVER:"); lcd.setCursor(0,1);
-      lcd.print("CONNECTED");
-    
-      String payload;
-      payload  = "field1=" + String(value1) + "&";
-      payload += "field2=" + String(value2);
-
-      String headers;
-      headers  = "X-THINGSPEAKAPIKEY: UF6TH2DLPKQMA4SP\r\n";
-      headers += "Content-Type: application/x-www-form-urlencoded\r\n";
-      
-      if(esp.sendServer(payload, headers, client, ESP8266::HTML_POST))
-      {
-        lcd.clear();
-        lcd.print("ESP SERVER:"); lcd.setCursor(0,1);
-        lcd.print("SEND OK");
-      }
-      else
-      {
-        lcd.clear();
-        lcd.print("ESP SERVER:"); lcd.setCursor(0,1);
-        lcd.print("SEND ERROR");
-      }
-    }
-    else
-    {
-      lcd.clear();
-      lcd.print("ESP SERVER:"); lcd.setCursor(0,1);
-      lcd.print("NOT CONNECTED");
-    }
-    esp.closeServer();
+    lcd.print(F("SET AP:")); lcd.setCursor(0,1);
+    lcd.print(F("ERROR"));
+    while(true) {};
   }
   else
   {
     lcd.clear();
-    lcd.print("ESP CONNECT AP:"); lcd.setCursor(0,1);
-    lcd.print("ERROR");
+    lcd.print(F("SET AP:")); lcd.setCursor(0,1);
+    lcd.print(F("OK"));
   }
-#endif
+
+  if(espMode == ESP8266::ESP_SERVER_MODE)
+  {
+    /* Inicializa servidor */
+    if(!esp.connect(espMode, espUrl))
+    {
+      lcd.clear();
+      lcd.print(F("SERVER INIT:")); lcd.setCursor(0,1);
+      lcd.print(F("ERROR"));
+      while(true) {};
+    }
+    else
+    {
+      lcd.clear();
+      lcd.print(F("SERVER INIT:")); lcd.setCursor(0,1);
+      lcd.print(F("OK"));
+    }
+  }
+}
+
+void loop() 
+{
+  if(espMode == ESP8266::ESP_CLIENT_MODE)
+  {
+    /* Obtém grandezas */
+    if(esp.checkWifi(10, 1000))
+    {
+      lcd.clear();
+      lcd.print(F("ESP CONNECT AP:")); lcd.setCursor(0,1);
+      lcd.print(F("OK"));
+  
+      if(esp.connect(espMode, espUrl))
+      {
+        lcd.clear();
+        lcd.print(F("ESP CONNECT:")); lcd.setCursor(0,1);
+        lcd.print(F("OK"));
+      
+        char payload[50];
+        strcpy(payload, "field1=0&field2=0");
+  
+        char headers[150];
+        strcpy(headers, "X-THINGSPEAKAPIKEY: UF6TH2DLPKQMA4SP\r\n");
+        strcat(headers, "Content-Type: application/x-www-form-urlencoded\r\n");
+        
+        if(esp.send(payload, headers, espUrl, ESP8266::HTML_POST))
+        {
+          lcd.clear();
+          lcd.print(F("ESP SEND:")); lcd.setCursor(0,1);
+          lcd.print(F("OK"));
+        }
+        else
+        {
+          lcd.clear();
+          lcd.print(F("ESP SEND:")); lcd.setCursor(0,1);
+          lcd.print(F("ERROR"));
+        }
+      }
+      else
+      {
+        lcd.clear();
+        lcd.print(F("ESP CONNECT:")); lcd.setCursor(0,1);
+        lcd.print(F("ERROR"));
+      }
+      esp.close();
+    }
+    else
+    {
+      lcd.clear();
+      lcd.print(F("ESP CONNECT AP:")); lcd.setCursor(0,1);
+      lcd.print(F("ERROR"));
+    }
+  }
 
   /* Aguarda período de publicação */
   while(true)
@@ -170,85 +221,212 @@ void loop()
       break;
     }
 
-    /* Verifica se houve conexão ao servidor do ESP8266 */
-    if(Serial.available())
+    if(espMode == ESP8266::ESP_SERVER_MODE)
     {
-      char payload[300];
-      char strBuffer[50];
-      serial_get((char*) "HTTP", 100, strBuffer);
-
-      /* PÁGINA INICIAL */
-      if(strstr(strBuffer, " / "))
+      /* Verifica se houve conexão ao servidor do ESP8266 */
+      if(Serial.available())
       {
-        serial_flush();
-        
-        lcd.clear();
-        lcd.print("ESP CLIENT:"); lcd.setCursor(0,1);
-        lcd.print("CONNECTED");
-
-        /* Copia página HTML da PROGMEM para RAM */
-        memcpy_P(payload, &HTML_PAGE[0], sizeof(payload));
-
-        /* Path */
-        server.path = "/";
-          
-        esp.sendServer(payload, (char*) NULL, server, ESP8266::HTML_RESPONSE_OK);
-        esp.closeServer();
-      }
-      /* ENVIO SSID & PASSWORD */
-      else if(strstr(strBuffer, " /send "))
-      {
-        /* Obtém payload da resposta */
-        serial_get((char*) "\r\n\r\n", 100);
-        serial_get((char*) "\r\n\r\n", 100, strBuffer);
-        serial_flush();
-
-        /* SSID */
-        char* tkn = strtok(strBuffer, "&");
-        if(tkn)
-          wifi.SSID = String(tkn+5);
-
-        /* Password */
-        tkn = strtok(NULL, "\r\n");
-        if(tkn)
-          wifi.password = String(tkn+5);
-
-        if(wifi.SSID.length() && wifi.password.length())
+        char payload[300];
+        char strBuffer[50];
+        serial_get((char*) "HTTP", 100, strBuffer);
+  
+        /* PÁGINA INICIAL */
+        if(strstr(strBuffer, " / "))
         {
-          lcd.clear();
-          lcd.print("ESP CLIENT:"); lcd.setCursor(0,1);
-          lcd.print("GOT NEW WIFI");
-        
-          /* Copia página HTML da PROGMEM para RAM */         
-          memcpy_P(payload, &HTML_PAGE[1], sizeof(payload));
-
-          /* Path */
-          server.path = "/send";
-
-          esp.sendServer(payload, (char*) NULL, server, ESP8266::HTML_RESPONSE_OK);
-          esp.closeServer();
-        }
-        else
-        {
-          lcd.clear();
-          lcd.print("ESP CONNECT AP:"); lcd.setCursor(0,1);
-          lcd.print("WRONG PARAMETERS");
+          serial_flush();
+          delay(100);
           
+          lcd.clear();
+          lcd.print(F("ESP CLIENT:")); lcd.setCursor(0,1);
+          lcd.print(F("CONNECTED"));
+  
           /* Copia página HTML da PROGMEM para RAM */
-          memcpy_P(payload, &HTML_PAGE[2], sizeof(payload));
-
+          memcpy_P(payload, &HTML_PAGE[0], sizeof(payload));
+  
           /* Path */
-          server.path = "/send";
-
-          esp.sendServer(payload, (char*) NULL, server, ESP8266::HTML_RESPONSE_OK);
-          esp.closeServer();
+          espUrl.path = "/";
+            
+          esp.send(payload, (char*) NULL, espUrl, ESP8266::HTML_RESPONSE_OK);
+          delay(100);
+          esp.close();
         }
+        /* ENVIO SSID & PASSWORD */
+        else if(strstr(strBuffer, " /send "))
+        {
+          /* Obtém payload da resposta */
+          serial_get((char*) "\r\n\r\n", 100);
+          serial_get((char*) "\r\n\r\n", 100, strBuffer);
+          serial_flush();
+          delay(100);
+  
+          /* SSID */
+          char* tkn = strtok(strBuffer, "&");
+          if(tkn)
+            espAp.SSID = String(tkn+5);
+          else
+            espAp.SSID = "";
+  
+          /* Password */
+          tkn = strtok(NULL, "\r\n");
+          if(tkn)
+            espAp.password = String(tkn+5);
+          else
+            espAp.password = "";
+  
+          if(espAp.SSID.length() && espAp.password.length())
+          {
+            lcd.clear();
+            lcd.print(F("ESP CLIENT:")); lcd.setCursor(0,1);
+            lcd.print(F("GOT NEW WIFI"));
+          
+            /* Copia página HTML da PROGMEM para RAM */         
+            memcpy_P(payload, &HTML_PAGE[1], sizeof(payload));
+  
+            /* Path */
+            espUrl.path = "/send";
+  
+            esp.send(payload, (char*) NULL, espUrl, ESP8266::HTML_RESPONSE_OK);
+            delay(100);
+            esp.close();
+
+            /* Salva AP na EEPROM */
+            if(EEPROM_write_AP(espAp))
+            {
+                lcd.clear();
+                lcd.print(F("EEPROM SAVED:")); lcd.setCursor(0,1);
+                lcd.print(F("AP"));
+                delay(1000);
+
+                lcd.clear();
+                lcd.print(F("SSID: ")); lcd.print(espAp.SSID); lcd.setCursor(0,1);
+                lcd.print(F("pass: ")); lcd.print(espAp.password);
+                delay(1000);
+            }
+          }
+          else
+          {
+            lcd.clear();
+            lcd.print(F("ESP CLIENT:")); lcd.setCursor(0,1);
+            lcd.print(F("WRONG INPUT"));
+            
+            /* Copia página HTML da PROGMEM para RAM */
+            memcpy_P(payload, &HTML_PAGE[2], sizeof(payload));
+  
+            /* Path */
+            espUrl.path = "/send";
+  
+            esp.send(payload, (char*) NULL, espUrl, ESP8266::HTML_RESPONSE_OK);
+            delay(100);
+            esp.close();
+          }
+        }
+        
+        serial_flush();
       }
-      
-      serial_flush();
     }
   }
 }
+
+/************************************************************************************
+* EEPROM_write_AP
+*
+* This function flushes the serial buffer.
+*
+************************************************************************************/
+bool EEPROM_write_AP(ESP8266::esp_AP_parameter_t &ap)
+{
+    uint16_t addr=0;
+
+    /* Verifica se possui ap */
+    if(!ap.SSID.length() || !ap.password.length())
+        return false;
+    
+    /* Indicador de início */
+    EEPROM.write(addr, 0xFE);
+    addr++;
+    
+    /* SSID */
+    for(uint16_t i=0; i<ap.SSID.length(); i++)
+    {
+        EEPROM.write(addr, ap.SSID[i]);
+        addr++;
+    }
+    /* NULL char */
+    EEPROM.write(addr, '\0');
+    addr++;
+    
+    /* Password */
+    for(uint16_t i=0; i<ap.password.length(); i++)
+    {
+        EEPROM.write(addr, ap.password[i]);
+        addr++;
+    }
+    /* NULL char */
+    EEPROM.write(addr, '\0');
+    addr++;
+    
+    return true;
+}
+
+/************************************************************************************
+* EEPROM_read_AP
+*
+* This function flushes the serial buffer.
+*
+************************************************************************************/
+bool EEPROM_read_AP(ESP8266::esp_AP_parameter_t &ap)
+{
+    uint16_t addr=0;
+    uint8_t i=0;
+    char strBuffer[50];
+
+    /* Indicador de início */
+    if(EEPROM.read(addr) != 0xFE)
+        return false;
+    addr++;
+
+    /* SSID */ 
+    while(true)
+    {
+      char u8byte = EEPROM.read(addr);
+      addr++;
+
+      if(u8byte)
+      {
+          strBuffer[i] = u8byte;
+          i++;
+      }
+      else
+      {
+          strBuffer[i] = '\0';
+          i=0;
+          ap.SSID = String(strBuffer);
+          break;
+      }
+    }
+    /* Password */ 
+    while(true)
+    {
+      char u8byte = EEPROM.read(addr);
+      addr++;
+
+      if(u8byte)
+      {
+          strBuffer[i] = u8byte;
+          i++;
+      }
+      else
+      {
+          strBuffer[i] = '\0';
+          i=0;
+          ap.password = String(strBuffer);
+          break;
+      }
+    }
+
+    return true;
+}
+
 
 /************************************************************************************
 * serial_flush
