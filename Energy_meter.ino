@@ -1,8 +1,10 @@
 #include "ESP8266.h"
+#include "ADS1115.h"
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
 #include <EEPROM.h>
 #include <MemoryFree.h>
+#include <math.h> 
 
 /*************************************************************************************
 * Private macros
@@ -11,6 +13,11 @@
 #define ESP_ENABLE_PIN      2
 #define ESP_AP_LIST_SIZE    10
 #define ESP_SLEEP_TIMEOUT   15  /* Minutes */
+
+/* ADC ADS1115 16bits */
+#define DATA_SIZE         10         /* Quantidade de amostras */
+#define RESISTOR          110         /* Valor do resitor shunt */
+#define SCALE             100000/50   /* Relação do TC */
 
 /* Chave bipolar */
 #define SWT1        3
@@ -33,6 +40,11 @@ ESP8266::esp_mode_t espMode;
 ESP8266::esp_URL_parameter_t espUrl;
 ESP8266::esp_AP_parameter_t espAp;
 
+#ifdef ADS1115_ENABLE
+/* Conversor ADC ADS1115 */
+ADS1115 ads;
+#endif
+
 /* LCD I2C */
 /* ADDR = 0x27 */
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -54,7 +66,12 @@ void setup()
   lcd.print(F("FREE MEMORY:")); lcd.setCursor(0,1);
   lcd.print(freeMemory());
   delay(1000);
-  
+
+#ifdef ADS1115_ENABLE
+  /* Configura ADS1115 */
+  ads.config();
+#endif
+
   /* Switch para inicialização do ESP em modo 'client' ou 'url' */
   pinMode(SWT1, INPUT_PULLUP);
   pinMode(SWT2, INPUT_PULLUP);
@@ -161,6 +178,30 @@ void loop()
 {
   if(espMode == ESP8266::ESP_CLIENT_MODE)
   {
+    int value1=0;
+    int value2=0;
+        
+#ifdef ADS1115_ENABLE
+    float adc[DATA_SIZE];
+    int16_t raw[DATA_SIZE];
+    memset(adc, 0.0, sizeof(adc));
+    memset(raw, 0, sizeof(raw));
+
+    /* Leitura do valor do ADC */
+    ads.readData(raw, DATA_SIZE);
+
+    /* Realiza os cálculos */
+    float rmsSum=0;
+    float rms=0;
+    for(int i=0; i<DATA_SIZE; i++)
+    {
+        adc[i] = raw[i]/32768.0*256.0;
+        rmsSum += adc[i]*adc[i];
+    }
+    rms = sqrt(rmsSum/DATA_SIZE);     /* [mV] */
+    value1 = rms/RESISTOR*SCALE;  /* [mA] */
+#endif
+
     /* Obtém grandezas */
     if(esp.checkWifi(10, 1000))
     {
@@ -175,7 +216,7 @@ void loop()
         lcd.print(F("OK"));
       
         char payload[50];
-        strcpy(payload, "field1=0&field2=0");
+        sprintf(payload, "field1=%d&field2=%d", value1, value2);
   
         char headers[150];
         strcpy(headers, "X-THINGSPEAKAPIKEY: UF6TH2DLPKQMA4SP\r\n");

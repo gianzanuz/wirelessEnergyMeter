@@ -313,8 +313,8 @@ bool ESP8266::send(const char* messagePayload, const char* messageHeaders, esp_U
     
     headers += "Host: " + url.host + "\r\n";
     if(strlen(messageHeaders))
-      headers += String(messageHeaders);
-    //headers += "Connection: close\r\n";  
+      headers += messageHeaders;
+    //headers += "Connection: close\r\n";
     headers += "Content-Length: " + String(strlen(messagePayload)) + String("\r\n\r\n");
 
     int totalSize = headers.length() + strlen(messagePayload) + 4; /* The last 4 is for 'CR' + 'LF' + 'CR' + 'LF' in FOOTER */
