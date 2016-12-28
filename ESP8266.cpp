@@ -291,46 +291,58 @@ bool ESP8266::connect(esp_mode_t &mode, esp_URL_parameter_t &url)
 bool ESP8266::send(const char* messagePayload, const char* messageHeaders, esp_URL_parameter_t &url, HTML_method_t method)
 {
   	String headers;
-  	String espSend;
-  	
+  	int totalSize;
+    
   	/************************************* HEADER *************************************/
   	/* Formatação do cabeçalho */
     switch(method)
     {
       case HTML_GET:
       {
-        headers  = "GET " + url.path + " HTTP/1.1" + "\r\n";
+        headers  = "GET " + url.path + messageHeaders + " HTTP/1.1" + "\r\n";
+        headers += "Host: " + url.host + "\r\n";
+
+        totalSize = headers.length() + 2;  /* The last 2 is for 'CR' + 'LF' in FOOTER */
       } break;
       case HTML_POST:
       {
         headers  = "POST " + url.path + " HTTP/1.1" + "\r\n";
+        headers += "Host: " + url.host + "\r\n";
+        if(strlen(messageHeaders))
+          headers += messageHeaders;
+        headers += "Content-Length: " + String(strlen(messagePayload)) + String("\r\n\r\n");
+
+        totalSize = headers.length() + strlen(messagePayload) + 4; /* The last 4 is for 'CR' + 'LF' + 'CR' + 'LF' in FOOTER */
       } break;
       case HTML_RESPONSE_OK:
       {
         headers  = "HTTP/1.1 200 OK\r\n";
+        headers += "Host: " + url.host + "\r\n";
+        if(strlen(messageHeaders))
+          headers += messageHeaders;
+        headers += "Content-Length: " + String(strlen(messagePayload)) + String("\r\n\r\n");
+
+        totalSize = headers.length() + strlen(messagePayload) + 4; /* The last 4 is for 'CR' + 'LF' + 'CR' + 'LF' in FOOTER */
       } break;
     }
-    
-    headers += "Host: " + url.host + "\r\n";
-    if(strlen(messageHeaders))
-      headers += messageHeaders;
-    //headers += "Connection: close\r\n";
-    headers += "Content-Length: " + String(strlen(messagePayload)) + String("\r\n\r\n");
 
-    int totalSize = headers.length() + strlen(messagePayload) + 4; /* The last 4 is for 'CR' + 'LF' + 'CR' + 'LF' in FOOTER */
-    espSend = "AT+CIPSEND=0," + String(totalSize) + String("\r\n");
-  	
+    char espSend[25];
+    sprintf(espSend, "AT+CIPSEND=0,%d\r\n", totalSize);
+
   	serial_flush();
-  	Serial.write(espSend.c_str());    	/* AT: Send command */
+  	Serial.write(espSend);    	        /* AT: Send command */
   	serial_get((char*) ">", 100);       /* Aguarda '>' */
   	Serial.write(headers.c_str());      /* Headers */  
   
     /************************************* BODY *************************************/
-    if(strlen(messagePayload))
+    if(method == HTML_POST || method == HTML_RESPONSE_OK)
       Serial.write(messagePayload);    		/* Payload */
 
     /************************************* FOOTER *************************************/
-  	Serial.write("\r\n\r\n");             	/* End of HTTP POST: 'CR' + 'LF' + 'CR' + 'LF' */ 
+    if(method == HTML_POST || method == HTML_RESPONSE_OK)
+  	  Serial.write("\r\n\r\n");             	/* End of HTTP POST: 'CR' + 'LF' + 'CR' + 'LF' */ 
+    else if(method == HTML_GET)
+      Serial.write("\r\n");                   /* End of HTTP GET: 'CR' + 'LF' */ 
 
     return serial_get((char*) "SEND OK", 1000); // Valor esperado: variável 'confirmationString'. Timeout: 1s.
 }

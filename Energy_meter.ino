@@ -9,15 +9,19 @@
 /*************************************************************************************
 * Private macros
 *************************************************************************************/
+/* Visualizar memória disponível */
+#define FREE_MEMORY_DISPLAY
+
 /* Modulo WiFi ESP8266 */
 #define ESP_ENABLE_PIN      2
 #define ESP_AP_LIST_SIZE    10
-#define ESP_SLEEP_TIMEOUT   15  /* Minutes */
+#define ESP_SLEEP_TIMEOUT   1  /* Minutes */
+#define THINGSPEAK_KEY      "UF6TH2DLPKQMA4SP"
 
 /* ADC ADS1115 16bits */
-#define DATA_SIZE         10         /* Quantidade de amostras */
-#define RESISTOR          110         /* Valor do resitor shunt */
-#define SCALE             100000/50   /* Relação do TC */
+#define SCALE             30000.0/1000.0   /* Relação do TC */
+#define DATA_SIZE         100            /* Quantidade de amostras */
+#define VOLTAGE_RMS       220.0           /* Tensão para estimar potência */
 
 /* Chave bipolar */
 #define SWT1        3
@@ -43,6 +47,8 @@ ESP8266::esp_AP_parameter_t espAp;
 #ifdef ADS1115_ENABLE
 /* Conversor ADC ADS1115 */
 ADS1115 ads;
+ADS1115::ADS1115_config_t ADS1115Config;
+ADS1115::ADS1115_data_t   ADS1115Data;
 #endif
 
 /* LCD I2C */
@@ -62,14 +68,11 @@ void setup()
 {
   lcd.begin();
 
+#ifdef FREE_MEMORY_DISPLAY
   lcd.clear();
   lcd.print(F("FREE MEMORY:")); lcd.setCursor(0,1);
   lcd.print(freeMemory());
   delay(1000);
-
-#ifdef ADS1115_ENABLE
-  /* Configura ADS1115 */
-  ads.config();
 #endif
 
   /* Switch para inicialização do ESP em modo 'client' ou 'url' */
@@ -180,26 +183,40 @@ void loop()
   {
     int value1=0;
     int value2=0;
-        
+
 #ifdef ADS1115_ENABLE
-    float adc[DATA_SIZE];
-    int16_t raw[DATA_SIZE];
-    memset(adc, 0.0, sizeof(adc));
-    memset(raw, 0, sizeof(raw));
+    /* Insere configurações do primeiro ADS */
+    /* Pino de endereço I2C = GND */
+    /* Canal diferencial = A0 - A1 */
+    /* Conversão contínua */
+    /* PGA FS = +-2048mV */
+    /* 860 samples/seg */
+    /* Comparador desabilitado */
+    memset(&ADS1115Config,0,sizeof(ADS1115Config));
+    ADS1115Config.status            = ADS1115::OS_N_EFF;
+    ADS1115Config.mux               = ADS1115::MUX_0_1;
+    ADS1115Config.gain              = ADS1115::PGA_2048;
+    ADS1115Config.mode              = ADS1115::MODE_CONT;
+    ADS1115Config.rate              = ADS1115::DR_860;
+    ADS1115Config.comp_queue        = ADS1115::COMP_DISABLE;
+    ADS1115Config.i2c_addr          = ADS1115::ADDR_GND;
+    ads.config(&ADS1115Config);
 
-    /* Leitura do valor do ADC */
-    ads.readData(raw, DATA_SIZE);
-
-    /* Realiza os cálculos */
-    float rmsSum=0;
-    float rms=0;
+    float rmsSum=0.0;
     for(int i=0; i<DATA_SIZE; i++)
     {
-        adc[i] = raw[i]/32768.0*256.0;
-        rmsSum += adc[i]*adc[i];
+      /* Leitura do valor do ADC */
+      /* Solicita 1 amostra */
+      ADS1115Data.data_size = 1;
+      ADS1115Data.i2c_addr = ADS1115::ADDR_GND;
+      ads.readData(&ADS1115Data);
+
+      /* Realiza os cálculos */
+      float adc = ADS1115Data.data_byte[0]/32768.0*2048.0;
+      rmsSum += adc*adc;
     }
-    rms = sqrt(rmsSum/DATA_SIZE);     /* [mV] */
-    value1 = rms/RESISTOR*SCALE;  /* [mA] */
+    value1 = sqrt(rmsSum/DATA_SIZE)*SCALE;  /* Corrente RMS [mA] */
+    value2 = value1*VOLTAGE_RMS/1000.0;      /* Potência Ativa [Watts] */
 #endif
 
     /* Obtém grandezas */
@@ -214,15 +231,11 @@ void loop()
         lcd.clear();
         lcd.print(F("ESP CONNECT:")); lcd.setCursor(0,1);
         lcd.print(F("OK"));
-      
-        char payload[50];
-        sprintf(payload, "field1=%d&field2=%d", value1, value2);
-  
+
         char headers[150];
-        strcpy(headers, "X-THINGSPEAKAPIKEY: UF6TH2DLPKQMA4SP\r\n");
-        strcat(headers, "Content-Type: application/x-www-form-urlencoded\r\n");
+        sprintf(headers, "?api_key=%s&field1=%d&field2=%d", THINGSPEAK_KEY, value1, value2);
         
-        if(esp.send(payload, headers, espUrl, ESP8266::HTML_POST))
+        if(esp.send((char*) NULL, headers, espUrl, ESP8266::HTML_GET))
         {
           lcd.clear();
           lcd.print(F("ESP SEND:")); lcd.setCursor(0,1);

@@ -17,7 +17,7 @@
 /*************************************************************************************
 * Public macros
 *************************************************************************************/
-//#define ADS1115_ENABLE     /**< Enable/Disable the ADS1115 module */        
+#define ADS1115_ENABLE     /**< Enable/Disable the ADS1115 module */        
         
 #ifdef ADS1115_ENABLE  
 
@@ -27,9 +27,23 @@
 class ADS1115
 {
 	public:
+    /*************************************************************************************
+    * Public macros
+    *************************************************************************************/
+    #define ADS1115_max_buffer_size   25
+
 		/*************************************************************************************
 		* Public enumeration
 		*************************************************************************************/
+    /* I²C ADDRESS (7 bits) */
+    typedef enum ADS1115_i2c_address_tag
+    {
+        ADDR_GND = 0x48,
+        ADDR_VDD = 0x49,
+        ADDR_SDA = 0x4A,
+        ADDR_SCL = 0x4B
+    } ADS1115_i2c_address_t;
+    
 		/* POINTER REGISTER */
 		typedef enum ADS1115_reg_pointer_tag
 		{
@@ -112,34 +126,37 @@ class ADS1115
 			COMP_QUE_FOUR_CONV = 0x02,
 			COMP_DISABLE       = 0x03
 		} ADS1115_comp_queue_t;
- 
+    
 		/*************************************************************************************
 		* Public struct
 		*************************************************************************************/
-		struct esp_AP_parameter_t
-		{
-			String SSID;
-			String password;
-			String signal;
-		};
-
-		struct esp_URL_parameter_t
-		{
-			String host;
-			String path;
-			String port;
-		};
-
-		/*************************************************************************************
-		* Public macros
-		*************************************************************************************/
-		#define ADDR            0x48        /* Endereço do sensor (7bits) */
-
+    /* Struct de configuração */
+    typedef struct ADS1115_config_tag
+    {
+        ADS1115_i2c_address_t       i2c_addr;
+        ADS1115_status_t            status;
+        ADS1115_mux_config_t        mux;
+        ADS1115_gain_t              gain;
+        ADS1115_mode_t              mode;
+        ADS1115_rate_t              rate;
+        ADS1115_comp_mode_t         comp_mode;
+        ADS1115_comp_polarity_t     comp_polarity;
+        ADS1115_latching_comp_t     comp_latching;
+        ADS1115_comp_queue_t        comp_queue;
+    } ADS1115_config_t;
+    
+    /* Struct de dados */
+    typedef struct ADS1115_data_tag
+    {
+        ADS1115_i2c_address_t       i2c_addr;
+        uint16_t                    data_size;
+        int16_t                     data_byte[ADS1115_max_buffer_size];
+    } ADS1115_data_t;
 		/*************************************************************************************
 		* Public prototypes
 		*************************************************************************************/
-    void config(void);
-    void readData(int16_t* data, uint16_t size);
+    void config(ADS1115_config_t* config);
+    void readData(ADS1115_data_t* data);
 
 	private:
 		/*************************************************************************************

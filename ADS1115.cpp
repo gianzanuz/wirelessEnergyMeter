@@ -13,17 +13,24 @@
  * @return true if passed sanity check.\n
            false if opposite.
 *******************************************************************************/
-void ADS1115::config(void)
+void ADS1115::config(ADS1115_config_t* config)
 {
-  	uint8_t configBytes[2];
-  	configBytes[0] = OS_N_EFF | MUX_0_1 | PGA_0256 | MODE_CONT; /* FIRST CONFIG BYTE */
-  	configBytes[1] = DR_860 | COMP_DISABLE; 					/* SECOND CONFIG BYTE */
+      /* Prepara buffer de envio */
+    uint8_t i2c_buffer[3];
+    i2c_buffer[0] = REG_CONFIG;
+    i2c_buffer[1] = config->status      | config->mux           | config->gain          | config->mode;
+    i2c_buffer[2] = config->rate        | config->comp_mode     | config->comp_polarity | config->comp_latching | config->comp_queue;
 
     /* Configuração */
-    Wire.beginTransmission(ADDR);
-    Wire.write(REG_CONFIG); /* POINTER REGISTER */
-    Wire.write(configBytes[0]);
-    Wire.write(configBytes[1]);
+    Wire.beginTransmission(config->i2c_addr);
+    Wire.write(i2c_buffer[0]); /* POINTER REGISTER */
+    Wire.write(i2c_buffer[1]); /* FIRST CONFIG BYTE */
+    Wire.write(i2c_buffer[2]); /* SECOND CONFIG BYTE */
+    Wire.endTransmission();
+
+    /* Indica registrador leitura */
+    Wire.beginTransmission(config->i2c_addr);
+    Wire.write(REG_CONVERSION); /* POINTER REGISTER */
     Wire.endTransmission();
 }
 
@@ -35,22 +42,24 @@ void ADS1115::config(void)
  * @param size Size of the buffer to read.
  * @return void
 *******************************************************************************/
-void ADS1115::readData(int16_t* data, uint16_t size)
+void ADS1115::readData(ADS1115_data_t* data)
 {
-	  /* Indica registrador leitura */
-    Wire.beginTransmission(ADDR);
-    Wire.write(REG_CONVERSION); /* POINTER REGISTER */
-    Wire.endTransmission();
-
-  	/* Obtém a quantidade de amostras solicitada */
-  	for(int i=0; i<size; i++)
+    /* Verifica se buffer solicitado é maior que o permitido */
+    if((data->data_size) > ADS1115_max_buffer_size)
+        return;
+  
+    /* Recebe dados do ADC */
+    /* Converte uint8_t em int16_t */
+  	for(int i=0; i<data->data_size; i++)
     {
         /* Recepção */
         /* Req. Leitura de 2 Bytes */
-        Wire.requestFrom(ADDR, 2);
+        uint8_t dataRaw[2] = {0,0};
+        Wire.requestFrom(data->i2c_addr, 2);
         while(!Wire.available()) {};
-        data[i] |= (Wire.read() << 8);
-        data[i] |=  Wire.read();
+        dataRaw[0] = Wire.read();
+        dataRaw[1] = Wire.read();
+        data->data_byte[i] =  (dataRaw[0] << 8) | (dataRaw[1]);
     }
 }
 #endif  /* ADS1115_ENABLE */
