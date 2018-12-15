@@ -126,7 +126,7 @@ bool ESP8266::setAP(esp_mode_t &mode, const esp_AP_parameter_t &AP)
         serial_flush();
         Serial.write("AT+CWQAP\r\n");
         serial_get((char*) "OK\r\n", 100); /* timeout: 100ms */
-        delay(100);
+        delay(250);
     
         /* AT: Connectar com AP */
         serial_flush();
@@ -162,23 +162,23 @@ bool ESP8266::setAP(esp_mode_t &mode, const esp_AP_parameter_t &AP)
 bool ESP8266::config(esp_mode_t &mode)
 {
     char strBuffer[100];
-    uint32_t delayMS = 50;
-      
-  	/* Inicializa serial em 115200 baud/s */
-  	Serial.end();
-  	Serial.begin(115200);
-  	
+    uint32_t delayMS = 250;
+
+    /* Inicializa serial em 9600 baud/s */
+    Serial.end();
+    Serial.begin(57600);
+    
     /* Reset do módulo WiFi */
     DESATIVA_ESP;
     delay(delayMS);
     ATIVA_ESP;
     /* Delay para inicializa��o */
-    delay(250);
-  
+    delay(1000);
+
     /* Remove mensagem de eco da serial */
     Serial.print("ATE0\r\n");
     delay(delayMS);
-    
+                                          
     /* Teste de sanidade do m�dulo ESP8266 */
     /* Valor esperado: 'OK'. Timeout: 100ms. */
     serial_flush();

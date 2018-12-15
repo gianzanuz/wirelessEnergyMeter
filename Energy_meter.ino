@@ -1,35 +1,34 @@
 #include "ESP8266.h"
 #include "ADS1115.h"
-#include <Wire.h> 
-#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <LiquidCrystal.h>
 #include <EEPROM.h>
-#include <MemoryFree.h>
+//#include <MemoryFree.h>
 #include <math.h> 
 
 /*************************************************************************************
 * Private macros
 *************************************************************************************/
 /* Visualizar memória disponível */
-#define FREE_MEMORY_DISPLAY
+//#define FREE_MEMORY_DISPLAY
 
 /* Modulo WiFi ESP8266 */
 #define ESP_ENABLE_PIN      2
 #define ESP_AP_LIST_SIZE    10
 #define ESP_SLEEP_TIMEOUT   1  /* Minutes */
-#define THINGSPEAK_KEY      "UF6TH2DLPKQMA4SP"
 
 /* ADC ADS1115 16bits */
-#define SCALE             30000.0/1000.0   /* Relação do TC */
-#define DATA_SIZE         100            /* Quantidade de amostras */
-#define VOLTAGE_RMS       220.0           /* Tensão para estimar potência */
+#define SCALE_1             50000.0/1000.0   /* Relação do TC */
+#define SCALE_2             50000.0/1000.0   /* Relação do TC */
+#define DATA_SIZE         500            /* Quantidade de amostras */
 
 /* Chave bipolar */
 #define SWT1        3
 #define SWT2        4
 
 /* Salva páginas HTML na memória de programa */
-const char HTML_PAGE[3][300] PROGMEM = {
-  { "<html><body><form action=\"send\" method=\"post\" target=\"_blank\"><fieldset><legend>Informações do WiFi:</legend>SSID:<br><input type=\"text\" name=\"SSID\"><br>Pass:<br><input type=\"password\" name=\"pass\"><br><br><input type=\"submit\" value=\"Enviar\"></fieldset></form></body></html>" },
+const char HTML_PAGE[3][325] PROGMEM = {
+  { "<html><body><form action=\"send\" method=\"post\" target=\"_blank\"><fieldset><legend>Configuracoes:</legend>SSID:<br><input type=\"text\" name=\"SSID\"><br>PASS:<br><input type=\"password\" name=\"pass\"><br>KEY:<br><input type=\"text\" name=\"key\"> <input type=\"submit\" value=\"Enviar\"></fieldset></form></body></html>" },
   { "<html><body><fieldset><legend>Informações do WiFi:</legend>Atualizado informações com sucesso!<br></fieldset></body></html>" },
   { "<html><body><fieldset><legend>Informações do WiFi:</legend>Erro: Verifique as informações inseridas.<br></fieldset></body></html>" }
 };
@@ -51,9 +50,8 @@ ADS1115::ADS1115_config_t ADS1115Config;
 ADS1115::ADS1115_data_t   ADS1115Data;
 #endif
 
-/* LCD I2C */
-/* ADDR = 0x27 */
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+/* LCD 16x2 */
+LiquidCrystal lcd(10, 11, 6, 7, 8, 9);
 
 /*************************************************************************************
 * Public prototypes
@@ -66,7 +64,7 @@ bool serial_get(const char* stringChecked, uint32_t timeout, char* serialBuffer 
 *************************************************************************************/
 void setup()
 {
-  lcd.begin();
+  lcd.begin(16, 2);
 
 #ifdef FREE_MEMORY_DISPLAY
   lcd.clear();
@@ -91,26 +89,32 @@ void setup()
     espUrl.host =    ESP_CLIENT_IP_DEFAULT;
     espUrl.path =    ESP_CLIENT_PATH_DEFAULT;
     espUrl.port =    ESP_CLIENT_PORT_DEFAULT;
+    espUrl.key  =    "";
 
-    /* Obtém AP da EEPROM, caso haja */
-    if(EEPROM_read_AP(espAp))
+    /* Obtém AP e key da EEPROM, caso haja */
+    if(EEPROM_read_AP(espAp, espUrl))
     {
         lcd.clear();
         lcd.print(F("EEPROM FOUND:")); lcd.setCursor(0,1);
-        lcd.print(F("AP"));
+        lcd.print(F("AP,Key"));
         delay(1000);
 
         lcd.clear();
         lcd.print(F("SSID: ")); lcd.print(espAp.SSID); lcd.setCursor(0,1);
         lcd.print(F("pass: ")); lcd.print(espAp.password);
         delay(1000);
+
+        lcd.clear();
+        lcd.print(F("Key: "));  lcd.setCursor(0,1);
+        lcd.print(espUrl.key);
+        delay(1000);
     }
     else
     {
         lcd.clear();
         lcd.print(F("EEPROM NOT FOUND:")); lcd.setCursor(0,1);
-        lcd.print(F("AP"));
-        delay(1000);
+        lcd.print(F("AP,Key"));
+        while(true) {};
     }
   }
   else
@@ -126,6 +130,7 @@ void setup()
     espUrl.host =    ESP_SERVER_IP_DEFAULT;
     espUrl.path =    ESP_SERVER_PATH_DEFAULT;
     espUrl.port =    ESP_SERVER_PORT_DEFAULT;
+    espUrl.key  =    "";
   }
     
   /* Configuração inicial do ESP */
@@ -181,9 +186,10 @@ void loop()
 {
   if(espMode == ESP8266::ESP_CLIENT_MODE)
   {
-    int value1=0;
-    int value2=0;
-
+    unsigned int value1=0;
+    unsigned int value2=0;
+    float rmsSum=0.0;
+    
 #ifdef ADS1115_ENABLE
     /* Insere configurações do primeiro ADS */
     /* Pino de endereço I2C = GND */
@@ -202,7 +208,12 @@ void loop()
     ADS1115Config.i2c_addr          = ADS1115::ADDR_GND;
     ads.config(&ADS1115Config);
 
-    float rmsSum=0.0;
+    /* Remove primeiras 5 amostras */
+    ADS1115Data.data_size = 5;
+    ADS1115Data.i2c_addr = ADS1115::ADDR_GND;
+    ads.readData(&ADS1115Data);
+
+    rmsSum = 0.0;
     for(int i=0; i<DATA_SIZE; i++)
     {
       /* Leitura do valor do ADC */
@@ -212,11 +223,47 @@ void loop()
       ads.readData(&ADS1115Data);
 
       /* Realiza os cálculos */
-      float adc = ADS1115Data.data_byte[0]/32768.0*2048.0;
+      float adc = ADS1115Data.data_byte[0]*0.0625;  /* 0.0625 = 2048.0/32768.0 */
       rmsSum += adc*adc;
     }
-    value1 = sqrt(rmsSum/DATA_SIZE)*SCALE;  /* Corrente RMS [mA] */
-    value2 = value1*VOLTAGE_RMS/1000.0;      /* Potência Ativa [Watts] */
+    value1 = (unsigned int) (sqrt(rmsSum/DATA_SIZE)*SCALE_1);  /* Corrente RMS [mA] */
+
+    /* Insere configurações do primeiro ADS */
+    /* Pino de endereço I2C = GND */
+    /* Canal diferencial = A2 - A3 */
+    /* Conversão contínua */
+    /* PGA FS = +-2048mV */
+    /* 860 samples/seg */
+    /* Comparador desabilitado */
+    memset(&ADS1115Config,0,sizeof(ADS1115Config));
+    ADS1115Config.status            = ADS1115::OS_N_EFF;
+    ADS1115Config.mux               = ADS1115::MUX_2_3;
+    ADS1115Config.gain              = ADS1115::PGA_2048;
+    ADS1115Config.mode              = ADS1115::MODE_CONT;
+    ADS1115Config.rate              = ADS1115::DR_860;
+    ADS1115Config.comp_queue        = ADS1115::COMP_DISABLE;
+    ADS1115Config.i2c_addr          = ADS1115::ADDR_GND;
+    ads.config(&ADS1115Config);
+
+    /* Remove primeiras 5 amostras */
+    ADS1115Data.data_size = 5;
+    ADS1115Data.i2c_addr = ADS1115::ADDR_GND;
+    ads.readData(&ADS1115Data);
+
+    rmsSum = 0.0;
+    for(int i=0; i<DATA_SIZE; i++)
+    {
+      /* Leitura do valor do ADC */
+      /* Solicita 1 amostra */
+      ADS1115Data.data_size = 1;
+      ADS1115Data.i2c_addr = ADS1115::ADDR_GND;
+      ads.readData(&ADS1115Data);
+
+      /* Realiza os cálculos */
+      float adc = ADS1115Data.data_byte[0]*0.0625;  /* 0.0625 = 2048.0/32768.0 */
+      rmsSum += adc*adc;
+    }
+    value2 = (unsigned int) (sqrt(rmsSum/DATA_SIZE)*SCALE_2);  /* Corrente RMS [mA] */
 #endif
 
     /* Obtém grandezas */
@@ -232,9 +279,10 @@ void loop()
         lcd.print(F("ESP CONNECT:")); lcd.setCursor(0,1);
         lcd.print(F("OK"));
 
-        char headers[150];
-        sprintf(headers, "?api_key=%s&field1=%d&field2=%d", THINGSPEAK_KEY, value1, value2);
-        
+        char headers[52];
+        char key[17]; espUrl.key.toCharArray(key, sizeof(key));
+        sprintf(headers, "?api_key=%s&field1=%u&field2=%u", key, value1, value2);
+
         if(esp.send((char*) NULL, headers, espUrl, ESP8266::HTML_GET))
         {
           lcd.clear();
@@ -280,10 +328,10 @@ void loop()
       /* Verifica se houve conexão ao servidor do ESP8266 */
       if(Serial.available())
       {
-        char payload[300];
-        char strBuffer[50];
+        char payload[325];
+        char strBuffer[65];
         serial_get((char*) "HTTP", 100, strBuffer);
-  
+                                 
         /* PÁGINA INICIAL */
         if(strstr(strBuffer, " / "))
         {
@@ -304,7 +352,7 @@ void loop()
           delay(100);
           esp.close();
         }
-        /* ENVIO SSID & PASSWORD */
+        /* ENVIO SSID & PASSWORD & KEY */
         else if(strstr(strBuffer, " /send "))
         {
           /* Obtém payload da resposta */
@@ -321,13 +369,20 @@ void loop()
             espAp.SSID = "";
   
           /* Password */
-          tkn = strtok(NULL, "\r\n");
+          tkn = strtok(NULL, "&");
           if(tkn)
             espAp.password = String(tkn+5);
           else
             espAp.password = "";
+
+          /* Key */
+          tkn = strtok(NULL, "\r\n");
+          if(tkn)
+            espUrl.key = String(tkn+4);
+          else
+            espUrl.key = "";
   
-          if(espAp.SSID.length() && espAp.password.length())
+          if(espAp.SSID.length() && espAp.password.length() && espUrl.key.length())
           {
             lcd.clear();
             lcd.print(F("ESP CLIENT:")); lcd.setCursor(0,1);
@@ -344,7 +399,7 @@ void loop()
             esp.close();
 
             /* Salva AP na EEPROM */
-            if(EEPROM_write_AP(espAp))
+            if(EEPROM_write_AP(espAp, espUrl))
             {
                 lcd.clear();
                 lcd.print(F("EEPROM SAVED:")); lcd.setCursor(0,1);
@@ -355,6 +410,12 @@ void loop()
                 lcd.print(F("SSID: ")); lcd.print(espAp.SSID); lcd.setCursor(0,1);
                 lcd.print(F("pass: ")); lcd.print(espAp.password);
                 delay(1000);
+                
+                lcd.clear();
+                lcd.print(F("Key: "));lcd.setCursor(0,1);
+                lcd.print(espUrl.key);
+                delay(1000);
+                
             }
           }
           else
@@ -387,12 +448,12 @@ void loop()
 * This function flushes the serial buffer.
 *
 ************************************************************************************/
-bool EEPROM_write_AP(ESP8266::esp_AP_parameter_t &ap)
+bool EEPROM_write_AP(ESP8266::esp_AP_parameter_t &ap, ESP8266::esp_URL_parameter_t &url)
 {
     uint16_t addr=0;
 
-    /* Verifica se possui ap */
-    if(!ap.SSID.length() || !ap.password.length())
+    /* Verifica se possui ap e key */
+    if(!ap.SSID.length() || !ap.password.length() || !url.key.length())
         return false;
     
     /* Indicador de início */
@@ -418,6 +479,16 @@ bool EEPROM_write_AP(ESP8266::esp_AP_parameter_t &ap)
     /* NULL char */
     EEPROM.write(addr, '\0');
     addr++;
+
+    /* Key */
+    for(uint16_t i=0; i<url.key.length(); i++)
+    {
+        EEPROM.write(addr, url.key[i]);
+        addr++;
+    }
+    /* NULL char */
+    EEPROM.write(addr, '\0');
+    addr++;
     
     return true;
 }
@@ -428,7 +499,7 @@ bool EEPROM_write_AP(ESP8266::esp_AP_parameter_t &ap)
 * This function flushes the serial buffer.
 *
 ************************************************************************************/
-bool EEPROM_read_AP(ESP8266::esp_AP_parameter_t &ap)
+bool EEPROM_read_AP(ESP8266::esp_AP_parameter_t &ap, ESP8266::esp_URL_parameter_t &url)
 {
     uint16_t addr=0;
     uint8_t i=0;
@@ -474,6 +545,25 @@ bool EEPROM_read_AP(ESP8266::esp_AP_parameter_t &ap)
           strBuffer[i] = '\0';
           i=0;
           ap.password = String(strBuffer);
+          break;
+      }
+    }
+    /* Key */ 
+    while(true)
+    {
+      char u8byte = EEPROM.read(addr);
+      addr++;
+
+      if(u8byte)
+      {
+          strBuffer[i] = u8byte;
+          i++;
+      }
+      else
+      {
+          strBuffer[i] = '\0';
+          i=0;
+          url.key = String(strBuffer);
           break;
       }
     }
