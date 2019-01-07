@@ -42,7 +42,7 @@
 * Public prototypes
 *************************************************************************************/  
 extern void serial_flush(void);
-extern bool serial_get(const char* stringChecked, uint32_t timeout, char* serialBuffer = (char*) NULL);
+extern bool serial_get(const char* stringChecked, uint32_t timeout, char* serialBuffer, uint16_t serialBufferSize);
 
 class ESP8266
 {
@@ -60,7 +60,8 @@ class ESP8266
     enum esp_mode_t
     {
       ESP_CLIENT_MODE = 1,
-      ESP_SERVER_MODE
+      ESP_SERVER_MODE,
+      ESP_CLIENT_AND_SERVER_MODE,
     };
  
 		/*************************************************************************************
@@ -68,30 +69,40 @@ class ESP8266
 		*************************************************************************************/
 		struct esp_AP_parameter_t
 		{
-			String SSID;
-			String password;
-			String signal;
+			char ssid[33];
+			char password[33];
+      char bssid[33];
+			int16_t rssi;
+      uint8_t channel;
 		};
 
 		struct esp_URL_parameter_t
 		{
-			char host[33];
-			char path[33];
-			uint16_t port;
+			char host[50];
+			char path[50];
       char key[33];
+      uint16_t port;
 		};
+
+    struct esp_AP_list_t
+    {
+        char ssid[33];
+        int16_t rssi;
+    };
 
 		/*************************************************************************************
 		* Public prototypes
 		*************************************************************************************/
 		ESP8266(int pin = 0);
-		int getAPList(esp_AP_parameter_t* apList, int apList_size = 20);
-		bool setAP(esp_mode_t &mode, const esp_AP_parameter_t &AP);
-		bool config(esp_mode_t &mode);
-		bool checkWifi(uint32_t retries, uint32_t delayMS);
-		bool connect(esp_mode_t &mode, esp_URL_parameter_t &url);
+		int getAPList(esp_AP_list_t* apList, int apList_size = 20);
+		bool setAP(esp_mode_t mode, const esp_AP_parameter_t &AP);
+		bool config(esp_mode_t mode);
+		bool checkWifi(uint32_t retries, uint32_t delayMS, esp_AP_parameter_t &AP);
+		bool connect(esp_URL_parameter_t &url);
+    bool server(esp_URL_parameter_t &url);
 		bool close(uint8_t connection);
-		void sleep(uint8_t type);
+    void wakeup(void);
+		void sleep(void);
 	
 	private:
 		/*************************************************************************************

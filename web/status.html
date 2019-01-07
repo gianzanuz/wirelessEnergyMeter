@@ -1,0 +1,121 @@
+<script>
+    function myFunction(timeout) {
+        setTimeout(showPage, timeout);
+    }
+
+    function showPage() {
+        document.getElementById("loader").style.display = "none";
+        document.getElementById("status").style.display = "block";
+    }
+</script>
+
+<style>
+    #loader {
+        margin: auto;
+        border: 16px solid #f2f2f2;
+        border-radius: 50%;
+        border-top: 16px solid #5BC0DE;
+        border-left: 16px solid #5BC0DE;
+        border-bottom: 16px solid #5BC0DE;
+        width: 120px;
+        height: 120px;
+        -webkit-animation: spin 2s linear infinite;
+        animation: spin 2s linear infinite;
+    }
+    
+    @-webkit-keyframes spin {
+        0% {
+            -webkit-transform: rotate(0deg);
+        }
+        100% {
+            -webkit-transform: rotate(360deg);
+        }
+    }
+    
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+    
+    .animate-bottom {
+        position: relative;
+        -webkit-animation-name: animatebottom;
+        -webkit-animation-duration: 1s;
+        animation-name: animatebottom;
+        animation-duration: 1s
+    }
+    
+    @-webkit-keyframes animatebottom {
+        from {
+            bottom: -100px;
+            opacity: 0
+        }
+        to {
+            bottom: 0px;
+            opacity: 1
+        }
+    }
+    
+    @keyframes animatebottom {
+        from {
+            bottom: -100px;
+            opacity: 0
+        }
+        to {
+            bottom: 0;
+            opacity: 1
+        }
+    }
+</style>
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="styles.css" media="screen" />
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <h2 style="text-align:center;"><span style="font-family:arial;">Status</span></h2>
+</head>
+
+<body onload="myFunction(100)">
+    <div id="loader"></div>
+
+    <div style="display:none;" id="status" class="animate-bottom">
+	
+<!-- QUEBRA DE PAGINA (HTML_WIFI ACIMA) -->
+<!-- INICIO CGI -->
+	
+	<div class="panel-green">
+		<h3><span style="color: #4CAF50;font-family:arial;"><b>Configura&ccedil;&atilde;o efetuada com sucesso.</b></span></h3>
+	</div>
+	<br>
+
+	<div class="panel-red">
+		<h3><span style="color: #D9534F;font-family:arial;"><b>Erro ao efetuar configura&ccedil;&atilde;o. Por favor, tente novamente.</b></span></h3>
+	</div>
+	<br>
+	
+	<form action="index.html">
+		<input class="btn btn-success" type="submit" value="Voltar">
+	</form>
+	
+    </div>
+</body>
+
+<!-- FIM CGI -->
+<!-- QUEBRA DE PAGINA (HTML_FOOTER ABAIXO) -->
+
+<footer>
+    <br>
+    <br>Vers&atilde;o do WEB firmware: v0.1.0 build 07/01/19
+    <br>Desenvolvido por 
+	<a href="mailto:gianzanuz@hotmail.com">Giancarlo Zanuz</a>
+    <br>
+</footer>
+
+</html>

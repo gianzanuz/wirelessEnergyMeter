@@ -1,0 +1,48 @@
+<!-- QUEBRA DE PAGINA (HTML_WIFI ABAIXO) -->
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="styles.css" media="screen" />
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <h2 style="text-align:center;"><span style="font-family:arial;">Rede Wi-Fi</span></h2>
+</head>
+
+<body>
+	<div class="panel">
+		<form action="wifi.html" method="post">
+			<label><b>Nome da rede:</b>
+				<input type="text" name="ssid" placeholder="rede" maxlength="32" required>
+			</label>
+			<br>
+			
+			<label><b>Senha da rede:</b>
+				<input type="password" name="pass" placeholder="senha" maxlength="32" required>
+			</label>
+			<br>
+			<input class="btn btn-success" type="submit" value="Enviar">
+		</form>
+	</div>
+
+	<form action="index.html">
+		<input class="btn btn-success" type="submit" value="Sair">
+	</form>
+	<form action="wifi.html">
+		<input class="btn btn-info" type="submit" value="Recarregar" />
+	</form>
+</body>
+
+<!-- FIM CGI -->
+<!-- QUEBRA DE PAGINA (HTML_FOOTER ABAIXO) -->
+
+<footer>
+    <br>
+    <br>Vers&atilde;o do WEB firmware: v0.1.0 build 07/01/19
+    <br>Desenvolvido por 
+	<a href="mailto:gianzanuz@hotmail.com">Giancarlo Zanuz</a>
+    <br>
+</footer>
+
+</html>
