@@ -248,7 +248,7 @@ bool ESP8266::connect(esp_mode_t &mode, esp_URL_parameter_t &url)
     {
       case ESP_CLIENT_MODE:
       {
-        sprintf(strBuffer, "AT+CIPSTART=0,\"TCP\",\"%s\",%s\r\n", url.host.c_str(), url.port.c_str());
+        sprintf(strBuffer, "AT+CIPSTART=0,\"TCP\",\"%s\",%u\r\n", url.host, url.port);
         
         /* Conecta ao servidor */
         serial_flush();
@@ -259,13 +259,13 @@ bool ESP8266::connect(esp_mode_t &mode, esp_URL_parameter_t &url)
       case ESP_SERVER_MODE:
       {
           /* Inicializa modo AP */
-          sprintf(strBuffer, "AT+CIPAP=\"%s\"\r\n", url.host.c_str());
+          sprintf(strBuffer, "AT+CIPAP=\"%s\"\r\n", url.host);
           Serial.write(strBuffer);
           if(!serial_get((char*) "OK\r\n",100))
              return false;
         
           /* Inicializar AP */
-          sprintf(strBuffer, "AT+CIPSERVER=1,%s\r\n", url.port.c_str());
+          sprintf(strBuffer, "AT+CIPSERVER=1,%u\r\n", url.port);
           Serial.write(strBuffer);
           return serial_get((char*) "OK\r\n",100);
       } break;
@@ -277,77 +277,6 @@ bool ESP8266::connect(esp_mode_t &mode, esp_URL_parameter_t &url)
 }
 
 /*******************************************************************************
-   SENDurl
-****************************************************************************//**
- * @brief Send string data to the cloud or to the local url through the ESP8266 WiFi module.
- * @param messagePayload The message to be sent.
- * @param url Controls settings for diferent urls:\n
-          "url_WEB": Headers + payload / urls: 'action' & 'message' / ACK: 'success'.\n
-          "url_LOCAL" & "url_BACKUP": Payload only / urls: none / ACK: 'LOCAL: MESSAGE RECEIVED'.
- * @param messagesAmount The number of messages to send.
- * @return true if the ACK was received.\n
-           FALSE if connection failed or no ACK was received.
-*******************************************************************************/
-bool ESP8266::send(const char* messagePayload, const char* messageHeaders, esp_URL_parameter_t &url, HTML_method_t method)
-{
-  	String headers;
-  	int totalSize;
-    
-  	/************************************* HEADER *************************************/
-  	/* Formatação do cabeçalho */
-    switch(method)
-    {
-      case HTML_GET:
-      {
-        headers  = "GET " + url.path + messageHeaders + " HTTP/1.1" + "\r\n";
-        headers += "Host: " + url.host + "\r\n";
-
-        totalSize = headers.length() + 2;  /* The last 2 is for 'CR' + 'LF' in FOOTER */
-      } break;
-      case HTML_POST:
-      {
-        headers  = "POST " + url.path + " HTTP/1.1" + "\r\n";
-        headers += "Host: " + url.host + "\r\n";
-        if(strlen(messageHeaders))
-          headers += messageHeaders;
-        headers += "Content-Length: " + String(strlen(messagePayload)) + String("\r\n\r\n");
-
-        totalSize = headers.length() + strlen(messagePayload) + 4; /* The last 4 is for 'CR' + 'LF' + 'CR' + 'LF' in FOOTER */
-      } break;
-      case HTML_RESPONSE_OK:
-      {
-        headers  = "HTTP/1.1 200 OK\r\n";
-        headers += "Host: " + url.host + "\r\n";
-        if(strlen(messageHeaders))
-          headers += messageHeaders;
-        headers += "Content-Length: " + String(strlen(messagePayload)) + String("\r\n\r\n");
-
-        totalSize = headers.length() + strlen(messagePayload) + 4; /* The last 4 is for 'CR' + 'LF' + 'CR' + 'LF' in FOOTER */
-      } break;
-    }
-
-    char espSend[25];
-    sprintf(espSend, "AT+CIPSEND=0,%d\r\n", totalSize);
-
-  	serial_flush();
-  	Serial.write(espSend);    	        /* AT: Send command */
-  	serial_get((char*) ">", 100);       /* Aguarda '>' */
-  	Serial.write(headers.c_str());      /* Headers */  
-  
-    /************************************* BODY *************************************/
-    if(method == HTML_POST || method == HTML_RESPONSE_OK)
-      Serial.write(messagePayload);    		/* Payload */
-
-    /************************************* FOOTER *************************************/
-    if(method == HTML_POST || method == HTML_RESPONSE_OK)
-  	  Serial.write("\r\n\r\n");             	/* End of HTTP POST: 'CR' + 'LF' + 'CR' + 'LF' */ 
-    else if(method == HTML_GET)
-      Serial.write("\r\n");                   /* End of HTTP GET: 'CR' + 'LF' */ 
-
-    return serial_get((char*) "SEND OK", 1000); // Valor esperado: variável 'confirmationString'. Timeout: 1s.
-}
-
-/*******************************************************************************
    CLOSEurl
 ****************************************************************************//**
  * @brief Close the ESP8266 WiFi module connection with the cloud.
@@ -355,10 +284,12 @@ bool ESP8266::send(const char* messagePayload, const char* messageHeaders, esp_U
  * @return true if no problems occured.\n
            FALSE if could not close connection.
 *******************************************************************************/
-bool ESP8266::close(void)
+bool ESP8266::close(uint8_t connection)
 {
     serial_flush();
-    Serial.write("AT+CIPCLOSE=0\r\n");
+    Serial.print("AT+CIPCLOSE=");
+    Serial.print(connection);
+    Serial.print("\r\n");
     return serial_get((char*) "CLOSED\r\n", 100); // Valor esperado: "CLOSED". Timeout: 100ms.
 }
 

@@ -24,18 +24,19 @@
   #define ATIVA_ESP     digitalWrite(enablePin,HIGH);
   
   #define ESP_SLEEP       /**< Enable/Disable the module entering deep-sleep */
+  #define WIFI_CLOSE_ALL                (5)
 
   #define ESP_SERVER_SSID               "ESP8266_AP"
   #define ESP_SERVER_PASSWORD           "1234"
   #define ESP_SERVER_IP_DEFAULT         "192.168.1.1"
-  #define ESP_SERVER_PATH_DEFAULT       ""
-  #define ESP_SERVER_PORT_DEFAULT       "80"
+  #define ESP_SERVER_PATH_DEFAULT       "/"
+  #define ESP_SERVER_PORT_DEFAULT       80
 
   #define ESP_CLIENT_SSID               "WiFi WaFer"
   #define ESP_CLIENT_PASSWORD           "moussedebanana"
   #define ESP_CLIENT_IP_DEFAULT         "api.thingspeak.com"
   #define ESP_CLIENT_PATH_DEFAULT       "/update"
-  #define ESP_CLIENT_PORT_DEFAULT       "80"
+  #define ESP_CLIENT_PORT_DEFAULT       80
 
 /*************************************************************************************
 * Public prototypes
@@ -74,10 +75,10 @@ class ESP8266
 
 		struct esp_URL_parameter_t
 		{
-			String host;
-			String path;
-			String port;
-      String key;
+			char host[33];
+			char path[33];
+			uint16_t port;
+      char key[33];
 		};
 
 		/*************************************************************************************
@@ -89,8 +90,7 @@ class ESP8266
 		bool config(esp_mode_t &mode);
 		bool checkWifi(uint32_t retries, uint32_t delayMS);
 		bool connect(esp_mode_t &mode, esp_URL_parameter_t &url);
-    bool send(const char* messagePayload, const char* messageHeaders, esp_URL_parameter_t &url, HTML_method_t method);
-		bool close(void);
+		bool close(uint8_t connection);
 		void sleep(uint8_t type);
 	
 	private:
