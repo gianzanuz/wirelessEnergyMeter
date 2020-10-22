@@ -1,30 +1,50 @@
 #include "ESP8266.h"
 #include "ADS1115.h"
+#include "CRC.h"
 #include <Wire.h>
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
-#include <MemoryFree.h>
 #include <math.h>
+#include <avr/wdt.h>
 
 /*************************************************************************************
   Private macros
 *************************************************************************************/
-/* Visualizar memória disponível */
-#define FREE_MEMORY_DISPLAY
-
-/* Modulo WiFi ESP8266 */
-#define ESP_ENABLE_PIN      2
-#define ESP_AP_LIST_SIZE    10
-#define ESP_SLEEP_TIMEOUT   1  /* Minutes */
 
 /* ADC ADS1115 16bits */
-#define SCALE_1             50000.0/1000.0   /* Relação do TC */
-#define SCALE_2             30000.0/1000.0   /* Relação do TC */
-#define DATA_SIZE         500            /* Quantidade de amostras */
+#define SCALE_1   (50)    /* 50A - 1V */
+#define SCALE_2   (50)    /* 50A - 1V */
+#define DATA_SIZE (500)   /* Quantidade de amostras */
+
+/* Power */
+#define DEF_VOLTAGE       (127)
+#define DEF_POWER_FACTOR  (0.866)
+
+/* Types */
+#define MEASURE_ELECTRICAL_CURRENT_AMPERE   (0x50)
+#define MEASURE_ELECTRICAL_ENERGY_KHW       (0x70)
 
 /* Chave bipolar */
-#define SWT1        3
-#define SWT2        4
+#define SWT1  (3)
+#define SWT2  (4)
+
+/* Configurações Firebase */
+#define FIREBASE_SOURCE_ID  "02:AB:C4:FF:3F"
+#define FIREBASE_HOST       "wirelessrht.firebaseio.com"
+#define FIREBASE_PORT       (443)
+#define FIREBASE_AUTH       "iUwJfO2uiu820Q2uzXMbBGqFM9iTUKsYDpokPcbI"
+#define FIREBASE_CLIENT     "AarXB9uiCDfQX53NqsXJbLY2Umz2" /* gianzanuz@gmail.com */
+
+/* Período de publicação */
+#define MESSAGE_SAMPLE_RATE     (180)
+
+/* EEPROM */
+#define EEPROM_ESP_AP_OFFSET    (0)
+#define EEPROM_ESP_URL_OFFSET   (EEPROM.length()/2)
+
+/* LDC */
+#define LCD_ENABLE
+// #define LCD_REFRESH_MEASURE
 
 /* Salva páginas HTML na memória de programa */
 const char HTML_PAGE_INDEX[] PROGMEM = "<!DOCTYPE html><html><head> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"> <link rel=\"icon\" href=\"favicon.ico\" type=\"image/x-icon\"> <h2 style=\"text-align:center;\"><span style=\"font-family:arial;\">Menu Principal</span></h2></head><body> <h3>Configura&ccedil;&otilde;es B&aacute;sicas:</h3> <div class=\"panel\"> <form action=\"wifi.html\"> <input class=\"btn btn-info\" type=\"submit\" value=\"Rede Wi-Fi\"> </form> <form action=\"servers.html\"> <input class=\"btn btn-info\" type=\"submit\" value=\"Servidor de destino\"> </form> </div> <br></body>";
@@ -58,10 +78,16 @@ LiquidCrystal lcd(10, 11, 6, 7, 8, 9);
 /* Soft-reset */
 bool resetFlag = false;
 
+/* Valores de corrente */
+float value1  = 0.0;
+float value2  = 0.0;
+uint32_t count = 0;
+
 /*************************************************************************************
   Public prototypes
 *************************************************************************************/
 bool IOT_send_GET(const char* path, const char* query, const char* host);
+bool IOT_send_POST(float value, uint32_t timestamp);
 
 void WEB_init(void);
 bool WEB_process_GET(uint8_t connection, char* path, char* parameters, uint32_t parametersSize);
@@ -74,6 +100,9 @@ bool WEB_headers(uint8_t connection);
 
 void serial_flush(void);
 bool serial_get(const char* stringChecked, uint32_t timeout, char* serialBuffer, uint16_t serialBufferSize);
+
+bool EEPROM_write(const uint8_t* buffer, int size, int addr);
+bool EEPROM_read(uint8_t* buffer, int size, int addr);
 
 /* Converts a hex character to its integer value */
 char from_hex(char ch);
@@ -90,21 +119,27 @@ void(* softReset) (void) = 0;
 *************************************************************************************/
 void setup()
 {
+#ifdef LCD_ENABLE
   lcd.begin(16, 2);
+#endif
 
 #ifdef FREE_MEMORY_DISPLAY
+#ifdef LCD_ENABLE
   lcd.clear();
   lcd.print(F("FREE MEMORY:")); lcd.setCursor(0, 1);
   lcd.print(freeMemory());
   delay(1000);
 #endif
+#endif
 
   /* Configuração inicial do ESP */
   if(!esp.config(ESP8266::ESP_CLIENT_AND_SERVER_MODE))
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("ESP CONFIG:")); lcd.setCursor(0, 1);
     lcd.print(F("ERROR"));
+#endif
 
     /* Aplica um soft-reset após delay */
     delay(60000);
@@ -112,10 +147,12 @@ void setup()
   }
   else
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("ESP CONFIG:")); lcd.setCursor(0, 1);
     lcd.print(F("OK"));
     delay(1000);
+#endif
   }
 
   /* Configurações do Soft Acess Point */
@@ -127,9 +164,11 @@ void setup()
   /* Ajuste do Soft Access Point */
   if(!esp.setAP(ESP8266::ESP_SERVER_MODE, espAp))
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("SET AP:")); lcd.setCursor(0, 1);
     lcd.print(F("ERROR"));
+#endif
 
     /* Aplica um soft-reset após delay */
     delay(60000);
@@ -137,10 +176,12 @@ void setup()
   }
   else
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("SET AP:")); lcd.setCursor(0, 1);
     lcd.print(F("OK"));
     delay(1000);
+#endif
   }
 
   /* Configurações servidor */
@@ -149,22 +190,26 @@ void setup()
   strncpy(espUrl.path, ESP_SERVER_PATH_DEFAULT, sizeof(espUrl.path));
   espUrl.path[sizeof(espUrl.path) - 1] = '\0';
   espUrl.port     = ESP_SERVER_PORT_DEFAULT;
-  espUrl.key[0]   = '\0';
+  //espUrl.key[0]   = '\0';
 
   /* Inicializa servidor */
   if(!esp.server(espUrl))
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("SERVER INIT:")); lcd.setCursor(0, 1);
     lcd.print(F("ERROR"));
+#endif
     while (true) {};
   }
   else
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("SERVER INIT:")); lcd.setCursor(0, 1);
     lcd.print(F("OK"));
     delay(1000);
+#endif
   }
     
   /* Configurações cliente */
@@ -178,11 +223,12 @@ void setup()
   strncpy(espUrl.path, ESP_CLIENT_PATH_DEFAULT, sizeof(espUrl.path));
   espUrl.path[sizeof(espUrl.path) - 1] = '\0';
   espUrl.port   = ESP_CLIENT_PORT_DEFAULT;
-  espUrl.key[0] = '\0';
+  //espUrl.key[0] = '\0';
 
   /* Obtém AP da EEPROM, caso haja */
-  if(EEPROM_read_AP(espAp))
+  if(EEPROM_read((uint8_t*) &espAp, sizeof(espAp), EEPROM_ESP_AP_OFFSET))
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("EEPROM FOUND:")); lcd.setCursor(0, 1);
     lcd.print(F("AP"));
@@ -192,21 +238,25 @@ void setup()
     lcd.print(F("SSID: ")); lcd.print(espAp.ssid); lcd.setCursor(0, 1);
     lcd.print(F("pass: ")); lcd.print(espAp.password);
     delay(1000);
+#endif
 
     /* Aplica novo AP recebido */
     esp.setAP(ESP8266::ESP_CLIENT_MODE, espAp);
   }
   else
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("EEPROM NOT FOUND:")); lcd.setCursor(0, 1);
     lcd.print(F("AP"));
     delay(1000);
+#endif
   }
 
   /* Obtém URL da EEPROM, caso haja */
-  if(EEPROM_read_URL(espUrl))
+  if(EEPROM_read((uint8_t*) &espUrl, sizeof(espUrl), EEPROM_ESP_URL_OFFSET))
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("EEPROM FOUND:")); lcd.setCursor(0, 1);
     lcd.print(F("SERVER"));
@@ -218,37 +268,74 @@ void setup()
     delay(1000);
 
     lcd.clear();
-    lcd.print(F("key: ")); lcd.print(espUrl.key); lcd.setCursor(0, 1);
+    //lcd.print(F("key: ")); lcd.print(espUrl.key); lcd.setCursor(0, 1);
     lcd.print(F("port: ")); lcd.print(espUrl.port);
     delay(1000);
+#endif
   }
   else
   {
+#ifdef LCD_ENABLE
     lcd.clear();
     lcd.print(F("EEPROM NOT FOUND:")); lcd.setCursor(0, 1);
     lcd.print(F("SERVER"));
     delay(1000);
+#endif
   }
+
+  strncpy(espUrl.host, FIREBASE_HOST, sizeof(espUrl.host));
+  espUrl.host[sizeof(espUrl.host) - 1] = '\0';
+  espUrl.port = FIREBASE_PORT;
+
+  /* Habilita watchdog */
+  wdt_enable(WDTO_8S);
 }
 
 void loop()
 {
   static uint32_t previousMillis = 0;
   uint32_t currentMillis = millis();
-  if((uint32_t) (currentMillis - previousMillis) > (uint32_t) ESP_SLEEP_TIMEOUT * 60 * 1000)
+  if((uint32_t) (currentMillis - previousMillis) > ((uint32_t) MESSAGE_SAMPLE_RATE * 1000))
   {
-    previousMillis = currentMillis;
-    IOT_measure();
+    /* Obtém a média de corrente elétrica no período */
+    value1 /= count;
+    value2 /= count;
+
+    /* Obtém o consumo energético */
+    float energy1 = value1 * DEF_VOLTAGE * DEF_POWER_FACTOR * (currentMillis - previousMillis) / 3600000000 ;
+    float energy2 = value2 * DEF_VOLTAGE * DEF_POWER_FACTOR * (currentMillis - previousMillis) / 3600000000 ;
+
+    /* Envia para servidores */
+    IOT_connect(value1, value2, energy1, energy2);
     serial_flush();
+
+    /* Reset nos registradores */
+    value1 = 0.0;
+    value2 = 0.0;
+    count = 0;
+
+    /* Atualiza tempo decorrido */
+    previousMillis = currentMillis;
   }
 
   /* Verifica se houve conexão ao servidor do ESP8266 */
   if(Serial.available())
     WEB_init();
 
+  /* Realiza medida */
+  /* Incrementa contagem */
+  float current1, current2;
+  IOT_measure(&current1, &current2);
+  value1 += current1;
+  value2 += current2;
+  count++;
+
   /* Realiza o soft-reset */
   if(resetFlag)
     softReset();
+
+  /* Atualiza watchdog */
+  wdt_reset();
 }
 
 /************************************************************************************
@@ -257,10 +344,10 @@ void loop()
   .
 
 ************************************************************************************/
-bool IOT_measure(void)
+bool IOT_measure(float* current1, float* current2)
 {
-    unsigned int value1 = 0;
-    unsigned int value2 = 0;
+    (*current1)    = 0.0;
+    (*current2)    = 0.0;
     float rmsSum = 0.0;
 
 #ifdef ADS1115_ENABLE
@@ -281,8 +368,8 @@ bool IOT_measure(void)
     ADS1115Config.i2c_addr          = ADS1115::ADDR_GND;
     ads.config(&ADS1115Config);
 
-    /* Remove primeiras 5 amostras */
-    ADS1115Data.data_size = 5;
+    /* Remove primeiras 10 amostras */
+    ADS1115Data.data_size = 10;
     ADS1115Data.i2c_addr = ADS1115::ADDR_GND;
     ads.readData(&ADS1115Data);
 
@@ -299,7 +386,7 @@ bool IOT_measure(void)
       float adc = ADS1115Data.data_byte[0] * 0.0625; /* 0.0625 = 2048.0/32768.0 */
       rmsSum += adc * adc;
     }
-    value1 = (unsigned int) (sqrt(rmsSum / DATA_SIZE) * SCALE_1); /* Corrente RMS [mA] */
+    (*current1) = sqrt(rmsSum / DATA_SIZE) * SCALE_1 * 1e-3; /* Corrente RMS [A] */
 
     /* Insere configurações do primeiro ADS */
     /* Pino de endereço I2C = GND */
@@ -318,8 +405,8 @@ bool IOT_measure(void)
     ADS1115Config.i2c_addr          = ADS1115::ADDR_GND;
     ads.config(&ADS1115Config);
 
-    /* Remove primeiras 5 amostras */
-    ADS1115Data.data_size = 5;
+    /* Remove primeiras 10 amostras */
+    ADS1115Data.data_size = 10;
     ADS1115Data.i2c_addr = ADS1115::ADDR_GND;
     ads.readData(&ADS1115Data);
 
@@ -336,112 +423,198 @@ bool IOT_measure(void)
       float adc = ADS1115Data.data_byte[0] * 0.0625; /* 0.0625 = 2048.0/32768.0 */
       rmsSum += adc * adc;
     }
-    value2 = (unsigned int) (sqrt(rmsSum / DATA_SIZE) * SCALE_2); /* Corrente RMS [mA] */
+    (*current2) = sqrt(rmsSum / DATA_SIZE) * SCALE_2 * 1e-3; /* Corrente RMS [A] */
 #endif
 
+#ifdef LCD_ENABLE
+  #ifdef LCD_REFRESH_MEASURE
+    /* Mostra na tela a cada 10 interações */
+    if(!(count % 10))
+    {
+      lcd.clear();
+      lcd.print("I: " + String((*current1) * 2) + " A rms"); lcd.setCursor(0, 1);
+      lcd.print("P: " + String((*current1) * 2 * DEF_VOLTAGE * DEF_POWER_FACTOR / 1000) + " kW");
+    }
+  #endif
+#endif
+
+    return true;
+}
+
+/************************************************************************************
+  IOT_connect
+
+  .
+
+************************************************************************************/
+bool IOT_connect(float value1, float value2, float energy1, float energy2)
+{
     /* Obtém grandezas */
     if(esp.checkWifi(10, 1000, espAp))
     {
+#ifdef LCD_ENABLE
       lcd.clear();
       lcd.print(F("ESP CONNECT AP:")); lcd.setCursor(0, 1);
       lcd.print(F("OK"));
+#endif
 
+      /* Obtém timestamp atual */
+      uint32_t timestamp = esp.getUnixTimestamp();
+      if(!timestamp)
+      {
+#ifdef LCD_ENABLE
+        lcd.clear();
+        lcd.print(F("ESP TIMESTAMP:")); lcd.setCursor(0, 1);
+        lcd.print(F("ERROR"));
+#endif
+
+        esp.close(ESP_CLOSE_ALL);
+        return false;
+      }
+      else
+      {
+#ifdef LCD_ENABLE
+        lcd.clear();
+        lcd.print(F("ESP TIMESTAMP:")); lcd.setCursor(0, 1);
+        lcd.print(timestamp);
+#endif
+      }
+
+      /* Abre conexão com servidor */
       if(esp.connect(espUrl))
       {
+#ifdef LCD_ENABLE
         lcd.clear();
         lcd.print(F("ESP CONNECT:")); lcd.setCursor(0, 1);
         lcd.print(F("OK"));
+#endif
 
-        char headers[] = "/update";
-        char query[65];
-        sprintf(query, "?api_key=%s&field1=%u&field2=%u", espUrl.key, value1, value2);
-
-        if(IOT_send_GET(headers, query, espUrl.host))
+        /* Envia conteudo */
+        if( IOT_send_POST(0, value1, MEASURE_ELECTRICAL_CURRENT_AMPERE, timestamp) && 
+            IOT_send_POST(1, value2, MEASURE_ELECTRICAL_CURRENT_AMPERE, timestamp) && 
+            IOT_send_POST(0, energy1, MEASURE_ELECTRICAL_ENERGY_KHW, timestamp) && 
+            IOT_send_POST(1, energy2, MEASURE_ELECTRICAL_ENERGY_KHW, timestamp))
         {
+#ifdef LCD_ENABLE
           lcd.clear();
           lcd.print(F("ESP SEND:")); lcd.setCursor(0, 1);
           lcd.print(F("OK"));
-
-          esp.close(WIFI_CLOSE_ALL);
+#endif
+          esp.close(ESP_CLOSE_ALL);
         }
         else
         {
+#ifdef LCD_ENABLE
           lcd.clear();
           lcd.print(F("ESP SEND:")); lcd.setCursor(0, 1);
           lcd.print(F("ERROR"));
-          
-          esp.close(WIFI_CLOSE_ALL);
+#endif
+          esp.close(ESP_CLOSE_ALL);
           return false;
         }
       }
       else
       {
+#ifdef LCD_ENABLE
         lcd.clear();
         lcd.print(F("ESP CONNECT:")); lcd.setCursor(0, 1);
         lcd.print(F("ERROR"));
-
-        esp.close(WIFI_CLOSE_ALL);
+#endif
+        esp.close(ESP_CLOSE_ALL);
         return false;
       }
     }
     else
     {
+#ifdef LCD_ENABLE
       lcd.clear();
       lcd.print(F("ESP CONNECT AP:")); lcd.setCursor(0, 1);
       lcd.print(F("ERROR"));
+#endif
       return false;
     }
 
     return true;
 }
 
+
 /************************************************************************************
-  IOT_send_GET
+  IOT_send_POST
 
   .
 
 ************************************************************************************/
-bool IOT_send_GET(const char* path, const char* query, const char* host)
+bool IOT_send_POST(uint8_t channel, float value, uint8_t type, uint32_t timestamp)
 {
+    /* Sequencial number */
+    static uint32_t seqNumber = 0;
+
     /* ESP8266: Inicializar envio */
     serial_flush();
     Serial.print(F("AT+CIPSENDEX=0,2047\r\n"));
     if(!serial_get(">", 100, NULL, 0))                  /* Aguarda '>' */
     {
-        esp.close(WIFI_CLOSE_ALL);
+        esp.close(ESP_CLOSE_ALL);
         return false;
     }
 
-    /* HTTP HEADERS */  
+    /* HTTP HEADERS */
+    /* HTTP POST */
     serial_flush();
-    Serial.print(F("GET "));
-    /* Path */
-    Serial.print(path);
-    /* Query */
-    Serial.print(query);
-    /* HTTP/1.1 */
-    Serial.print(F(" HTTP/1.1\r\n"));
+    Serial.print(F("POST /users/" FIREBASE_CLIENT "/measures/"));
+    Serial.print((type == MEASURE_ELECTRICAL_CURRENT_AMPERE) ? F("current") : F("energy"));
+    Serial.print(F(".json?auth=" FIREBASE_AUTH " HTTP/1.1\r\n"));
     /* Host */
-    Serial.print(F("Host: "));
-    Serial.print(host);
-    Serial.print(F("\r\n"));
+    Serial.print(F("Host: " FIREBASE_HOST "\r\n"));
     /* Connection */
-    Serial.print(F("Connection: Close\r\n"));
+    Serial.print(F("Connection: keep-alive\r\n"));
+    /* Chunked */
+    Serial.print(F("Transfer-Encoding: chunked\r\n"));
     /* Header End */
     Serial.print(F("\r\n"));
     
+    /* Formata body */
+    char buffer[50];
+    sprintf(buffer, "{\"value\":%s,\r\n", String(value, 5).c_str());
+    Serial.println(strlen(buffer) - 2, HEX);
+    Serial.print(buffer);
+
+    sprintf(buffer, "\"channel\":%u,\r\n", channel);
+    Serial.println(strlen(buffer) - 2, HEX);
+    Serial.print(buffer);
+
+    sprintf(buffer, "\"type\":%u,\r\n", type);    /* MEASURE_ELECTRICAL_CURRENT_AMPERE : 0x50 / MEASURE_ELECTRICAL_ENERGY_KHW : 0x60 */
+    Serial.println(strlen(buffer) - 2, HEX);
+    Serial.print(buffer);
+
+    sprintf(buffer, "\"seqNumber\":%lu,\r\n", seqNumber++);
+    Serial.println(strlen(buffer) - 2, HEX);
+    Serial.print(buffer);
+
+    sprintf(buffer, "\"timestamp\":%lu,\r\n", timestamp);
+    Serial.println(strlen(buffer) - 2, HEX);
+    Serial.print(buffer);
+
+    sprintf(buffer, "\"device\":\"%s\"}\r\n", FIREBASE_SOURCE_ID);
+    Serial.println(strlen(buffer) - 2, HEX);
+    Serial.print(buffer);
+
+    /* End chunk */
+    Serial.write("0\r\n\r\n");
+
     /* AT: End Send */
     Serial.write("\\0");
 
     /* Return */
     serial_get((char*) "SEND OK", 1000, NULL, 0);
-    if(!serial_get((char*) "CLOSED\r\n", 1000, NULL, 0))
+    if(!serial_get((char*) "HTTP/1.1 200 OK\r\n", 1000, NULL, 0))
     {
-        esp.close(WIFI_CLOSE_ALL);
+        esp.close(ESP_CLOSE_ALL);
         return false;
     }
     return true;
 }
+
 
 /************************************************************************************
   WEB_init
@@ -459,7 +632,7 @@ void WEB_init()
   if(!serial_get((char*) "HTTP/1.1\r\n", 500, strBuffer, sizeof(strBuffer)))
   {
     /* Fecha todas as conexões */
-    esp.close(WIFI_CLOSE_ALL);
+    esp.close(ESP_CLOSE_ALL);
     return;
   }
 
@@ -522,7 +695,7 @@ void WEB_init()
     Serial.print(",2047\r\n");
     if (!serial_get(">", 100, NULL, 0))                 /* Aguarda '>' */
     {
-      esp.close(WIFI_CLOSE_ALL);
+      esp.close(ESP_CLOSE_ALL);
       return;
     }
 
@@ -550,9 +723,11 @@ void WEB_init()
 ************************************************************************************/
 bool WEB_process_GET(uint8_t connection, char* path, char* parameter, uint32_t parameterSize)
 {
+#ifdef LCD_ENABLE
   lcd.clear();
   lcd.print(F("ESP SERVER:")); lcd.setCursor(0, 1);
   lcd.print(F("GET"));
+#endif
 
   /* INDEX */
   if(!strcmp(path, "/") || !strcmp(path, "/index.html"))
@@ -633,7 +808,7 @@ bool WEB_process_GET(uint8_t connection, char* path, char* parameter, uint32_t p
     Serial.print(",2047\r\n");
     if (!serial_get(">", 100, NULL, 0))                 /* Aguarda '>' */
     {
-      esp.close(WIFI_CLOSE_ALL);
+      esp.close(ESP_CLOSE_ALL);
       return false;
     }
 
@@ -659,10 +834,12 @@ bool WEB_process_GET(uint8_t connection, char* path, char* parameter, uint32_t p
 ************************************************************************************/
 bool WEB_process_POST(uint8_t connection, char* path, char* body, uint32_t bodySize)
 {
+#ifdef LCD_ENABLE
   lcd.clear();
   lcd.print(F("ESP SERVER:")); lcd.setCursor(0, 1);
   lcd.print(F("POST"));
-  
+#endif
+
   /* WIFI */
   if(strstr(path, "/wifi.html"))
   {
@@ -706,14 +883,16 @@ bool WEB_process_POST(uint8_t connection, char* path, char* body, uint32_t bodyS
 
     if(strlen(espAp.ssid) && strlen(espAp.password))
     {
+#ifdef LCD_ENABLE
       lcd.clear();
       lcd.print(F("ESP SERVER:")); lcd.setCursor(0, 1);
       lcd.print(F("GOT NEW WIFI"));
       delay(1000);
-      
+#endif
       /* Salva AP na EEPROM */
-      if(EEPROM_write_AP(espAp))
+      if(EEPROM_write((uint8_t*) &espAp, sizeof(espAp), EEPROM_ESP_AP_OFFSET))
       {
+#ifdef LCD_ENABLE
         lcd.clear();
         lcd.print(F("EEPROM SAVED:")); lcd.setCursor(0, 1);
         lcd.print(F("AP"));
@@ -723,7 +902,7 @@ bool WEB_process_POST(uint8_t connection, char* path, char* body, uint32_t bodyS
         lcd.print(F("SSID: ")); lcd.print(espAp.ssid); lcd.setCursor(0, 1);
         lcd.print(F("pass: ")); lcd.print(espAp.password);
         delay(1000);
-
+#endif
         /* Ativa flag de reset */
         resetFlag = true;
       }
@@ -738,11 +917,12 @@ bool WEB_process_POST(uint8_t connection, char* path, char* body, uint32_t bodyS
     }
     else
     {
+#ifdef LCD_ENABLE
       lcd.clear();
       lcd.print(F("ESP SERVER:")); lcd.setCursor(0, 1);
       lcd.print(F("WRONG INPUT"));
       delay(1000);
-
+#endif
       /* INICIALIZA ENVIO DO CHUNK (FAIL) */
       if(!WEB_chunk_init(connection))
         return false;
@@ -816,22 +996,24 @@ bool WEB_process_POST(uint8_t connection, char* path, char* body, uint32_t bodyS
     if(!strcmp(tkn, "key"))
     {
         tkn = strtok(NULL, "=&");
-        url_decode(tkn, espUrl.key, sizeof(espUrl.key)); /* Decodifica caracteres especiais */
-        str_safe(espUrl.key, sizeof(espUrl.key)); /* Torna a string 'segura' */
+        //url_decode(tkn, espUrl.key, sizeof(espUrl.key)); /* Decodifica caracteres especiais */
+        //str_safe(espUrl.key, sizeof(espUrl.key)); /* Torna a string 'segura' */
     }
     else
-      espUrl.key[0] = '\0';
+      //espUrl.key[0] = '\0';
 
-    if(strlen(espUrl.host) && strlen(espUrl.path) && strlen(espUrl.key) && espUrl.port)
+    if(strlen(espUrl.host) && strlen(espUrl.path) && espUrl.port)//strlen(espUrl.key) 
     {
+#ifdef LCD_ENABLE
       lcd.clear();
       lcd.print(F("ESP SERVER:")); lcd.setCursor(0, 1);
       lcd.print(F("GOT NEW SERVER"));
       delay(1000);
-      
+#endif
       /* Salva URL na EEPROM */
-      if(EEPROM_write_URL(espUrl))
+      if(EEPROM_write((uint8_t*) &espUrl, sizeof(espUrl), EEPROM_ESP_URL_OFFSET))
       {
+#ifdef LCD_ENABLE
         lcd.clear();
         lcd.print(F("EEPROM SAVED:")); lcd.setCursor(0, 1);
         lcd.print(F("SERVER"));
@@ -844,8 +1026,9 @@ bool WEB_process_POST(uint8_t connection, char* path, char* body, uint32_t bodyS
 
         lcd.clear();
         lcd.print(F("port: ")); lcd.print(espUrl.port); lcd.setCursor(0, 1);
-        lcd.print(F("key: ")); lcd.print(espUrl.key);
+        //lcd.print(F("key: ")); lcd.print(espUrl.key);
         delay(1000);
+#endif
       }
 
       /* INICIALIZA ENVIO DO CHUNK (SUCCESS) */
@@ -858,11 +1041,12 @@ bool WEB_process_POST(uint8_t connection, char* path, char* body, uint32_t bodyS
     }
     else
     {
+#ifdef LCD_ENABLE
       lcd.clear();
       lcd.print(F("ESP SERVER:")); lcd.setCursor(0, 1);
       lcd.print(F("WRONG INPUT"));
       delay(1000);
-
+#endif
       /* INICIALIZA ENVIO DO CHUNK (FAIL) */
       if(!WEB_chunk_init(connection))
         return false;
@@ -890,7 +1074,7 @@ bool WEB_process_POST(uint8_t connection, char* path, char* body, uint32_t bodyS
     Serial.print(",2047\r\n");
     if (!serial_get(">", 100, NULL, 0))                 /* Aguarda '>' */
     {
-      esp.close(WIFI_CLOSE_ALL);
+      esp.close(ESP_CLOSE_ALL);
       return false;
     }
 
@@ -924,7 +1108,7 @@ bool WEB_chunk_init(uint8_t connection)
     Serial.print(",2047\r\n");
     if(!serial_get(">", 1000, NULL, 0))
     {
-        esp.close(WIFI_CLOSE_ALL);
+        esp.close(ESP_CLOSE_ALL);
         return false;
     }
     return true;
@@ -957,7 +1141,7 @@ bool WEB_chunk_finish(void)
     Serial.print("\\0");
     if(!serial_get("SEND OK\r\n", 1000, NULL, 0))
     {
-        esp.close(WIFI_CLOSE_ALL);
+        esp.close(ESP_CLOSE_ALL);
         return false;
     }
     return true;
@@ -1000,268 +1184,36 @@ bool WEB_headers(uint8_t connection)
 }
 
 /************************************************************************************
-  EEPROM_write_AP
+  EEPROM_write
 
   
 
 ************************************************************************************/
-bool EEPROM_write_AP(ESP8266::esp_AP_parameter_t &ap)
+bool EEPROM_write(const uint8_t* buffer, int size, int addr)
 {
-  uint16_t addr = 0;
-
-  /* Verifica se possui ap */
-  if(!strlen(ap.ssid) || !strlen(ap.password))
-    return false;
-
-  /* Indicador de início */
-  EEPROM.write(addr, 0xFE);
-  addr++;
-
-  /* SSID */
-  for (uint16_t i = 0; i < strlen(ap.ssid); i++)
-  {
-    EEPROM.write(addr, ap.ssid[i]);
-    addr++;
-  }
-  /* NULL char */
-  EEPROM.write(addr, '\0');
-  addr++;
-
-  /* Password */
-  for (uint16_t i = 0; i < strlen(ap.password); i++)
-  {
-    EEPROM.write(addr, ap.password[i]);
-    addr++;
-  }
-  /* NULL char */
-  EEPROM.write(addr, '\0');
-  addr++;
+  /* Escreve buffer na EEPROM */
+  /* Salva CRC8 no final */
+  for(int i=0; i<size; i++)
+    EEPROM.write(addr++, buffer[i]);
+  EEPROM.write(addr, CRC_8(buffer, size, CRC_8_MAXIM_POLY));
 
   return true;
 }
 
 /************************************************************************************
-  EEPROM_write_URL
+  EEPROM_read
 
   
 
 ************************************************************************************/
-bool EEPROM_write_URL(ESP8266::esp_URL_parameter_t &url)
+bool EEPROM_read(uint8_t* buffer, int size, int addr)
 {
-  uint16_t addr = EEPROM.length()/2;
+  /* Escreve buffer na EEPROM */
+  for(int i=0; i<size; i++)
+    buffer[i] = EEPROM.read(addr++);
 
-  /* Verifica se possui ap */
-  if(!strlen(url.host) || !strlen(url.path) || !strlen(url.key) || !url.port)
-    return false;
-
-  /* Indicador de início */
-  EEPROM.write(addr, 0xFE);
-  addr++;
-
-  /* host */
-  for (uint16_t i = 0; i < strlen(url.host); i++)
-  {
-    EEPROM.write(addr, url.host[i]);
-    addr++;
-  }
-  /* NULL char */
-  EEPROM.write(addr, '\0');
-  addr++;
-
-  /* path */
-  for (uint16_t i = 0; i < strlen(url.path); i++)
-  {
-    EEPROM.write(addr, url.path[i]);
-    addr++;
-  }
-  /* NULL char */
-  EEPROM.write(addr, '\0');
-  addr++;
-
-  /* key */
-  for (uint16_t i = 0; i < strlen(url.key); i++)
-  {
-    EEPROM.write(addr, url.key[i]);
-    addr++;
-  }
-  /* NULL char */
-  EEPROM.write(addr, '\0');
-  addr++;
-
-  /* port */
-  char port[10];
-  sprintf(port, "%u", url.port);
-  for (uint16_t i = 0; i < strlen(port); i++)
-  {
-    EEPROM.write(addr, port[i]);
-    addr++;
-  }
-  /* NULL char */
-  EEPROM.write(addr, '\0');
-  addr++;
-
-  return true;
-}
-
-/************************************************************************************
-  EEPROM_read_AP
-
-  
-
-************************************************************************************/
-bool EEPROM_read_AP(ESP8266::esp_AP_parameter_t &ap)
-{
-  uint16_t addr = 0;
-  uint8_t i = 0;
-  char strBuffer[50];
-
-  /* Indicador de início */
-  if (EEPROM.read(addr) != 0xFE)
-    return false;
-  addr++;
-
-  /* SSID */
-  while (true)
-  {
-    char u8byte = EEPROM.read(addr);
-    addr++;
-
-    if (u8byte)
-    {
-      strBuffer[i] = u8byte;
-      i++;
-    }
-    else
-    {
-      strBuffer[i] = '\0';
-      i = 0;
-      strncpy(ap.ssid, strBuffer, sizeof(ap.ssid));
-      ap.ssid[sizeof(ap.ssid) - 1] = '\0';
-      break;
-    }
-  }
-  /* Password */
-  while (true)
-  {
-    char u8byte = EEPROM.read(addr);
-    addr++;
-
-    if (u8byte)
-    {
-      strBuffer[i] = u8byte;
-      i++;
-    }
-    else
-    {
-      strBuffer[i] = '\0';
-      i = 0;
-      strncpy(ap.password, strBuffer, sizeof(ap.password));
-      ap.password[sizeof(ap.password) - 1] = '\0';
-      break;
-    }
-  }
-
-  return true;
-}
-
-/************************************************************************************
-  EEPROM_read_URL
-
-  
-
-************************************************************************************/
-bool EEPROM_read_URL(ESP8266::esp_URL_parameter_t &url)
-{
-  uint16_t addr = EEPROM.length()/2;
-  uint8_t i = 0;
-  char strBuffer[50];
-
-  /* Indicador de início */
-  if (EEPROM.read(addr) != 0xFE)
-    return false;
-  addr++;
-
-  /* host */
-  while (true)
-  {
-    char u8byte = EEPROM.read(addr);
-    addr++;
-
-    if (u8byte)
-    {
-      strBuffer[i] = u8byte;
-      i++;
-    }
-    else
-    {
-      strBuffer[i] = '\0';
-      i = 0;
-      strncpy(url.host, strBuffer, sizeof(url.host));
-      url.host[sizeof(url.host) - 1] = '\0';
-      break;
-    }
-  }
-  /* path */
-  while (true)
-  {
-    char u8byte = EEPROM.read(addr);
-    addr++;
-
-    if (u8byte)
-    {
-      strBuffer[i] = u8byte;
-      i++;
-    }
-    else
-    {
-      strBuffer[i] = '\0';
-      i = 0;
-      strncpy(url.path, strBuffer, sizeof(url.path));
-      url.path[sizeof(url.path) - 1] = '\0';
-      break;
-    }
-  }
-  /* key */
-  while (true)
-  {
-    char u8byte = EEPROM.read(addr);
-    addr++;
-
-    if (u8byte)
-    {
-      strBuffer[i] = u8byte;
-      i++;
-    }
-    else
-    {
-      strBuffer[i] = '\0';
-      i = 0;
-      strncpy(url.key, strBuffer, sizeof(url.key));
-      url.key[sizeof(url.key) - 1] = '\0';
-      break;
-    }
-  }
-  /* port */
-  while (true)
-  {
-    char u8byte = EEPROM.read(addr);
-    addr++;
-
-    if (u8byte)
-    {
-      strBuffer[i] = u8byte;
-      i++;
-    }
-    else
-    {
-      strBuffer[i] = '\0';
-      i = 0;
-      url.port = (uint16_t) atoi(strBuffer);
-      break;
-    }
-  }
-
-  return true;
+  /* Verifica CRC8 no final */
+  return (EEPROM.read(addr) == CRC_8(buffer, size, CRC_8_MAXIM_POLY));
 }
 
 /************************************************************************************
@@ -1341,6 +1293,9 @@ bool serial_get(const char* stringChecked, uint32_t timeout, char* serialBuffer,
     if (counter >= timeout * 1000)
       return false;
     delayMicroseconds(1);
+
+    /* Atualiza watchdog */
+    wdt_reset();
   }
 }
 

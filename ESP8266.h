@@ -18,25 +18,41 @@
 * Public macros
 *************************************************************************************/
 #define ESP8266_ENABLE     /**< Enable/Disable the WiFi ESP8266 module, which transmits the packages to the urls */        
-        
-#ifdef ESP8266_ENABLE  
-  #define DESATIVA_ESP  digitalWrite(enablePin,LOW);
-  #define ATIVA_ESP     digitalWrite(enablePin,HIGH);
-  
-  #define ESP_SLEEP       /**< Enable/Disable the module entering deep-sleep */
-  #define WIFI_CLOSE_ALL                (5)
 
-  #define ESP_SERVER_SSID               "ESP8266_AP"
-  #define ESP_SERVER_PASSWORD           "1234"
-  #define ESP_SERVER_IP_DEFAULT         "192.168.1.1"
-  #define ESP_SERVER_PATH_DEFAULT       "/"
-  #define ESP_SERVER_PORT_DEFAULT       80
+#ifndef ESP8266_ENABLE
+  #warning WiFi desabilitado
+#endif
 
-  #define ESP_CLIENT_SSID               "WiFi WaFer"
-  #define ESP_CLIENT_PASSWORD           "moussedebanana"
-  #define ESP_CLIENT_IP_DEFAULT         "api.thingspeak.com"
-  #define ESP_CLIENT_PATH_DEFAULT       "/update"
-  #define ESP_CLIENT_PORT_DEFAULT       80
+/* Hardware */
+#define ESP_ENABLE_PIN (2)
+#define ESP_DESATIVA digitalWrite(enablePin, LOW);
+#define ESP_ATIVA digitalWrite(enablePin, HIGH);
+
+/* Config */
+#define ESP_SLEEP /**< Enable/Disable the module entering deep-sleep */
+#define ESP_AP_LIST_SIZE (10)
+
+/* Server default */
+#define ESP_SERVER_SSID "ESP8266_AP"
+#define ESP_SERVER_PASSWORD "1234"
+#define ESP_SERVER_IP_DEFAULT "192.168.1.1"
+#define ESP_SERVER_PATH_DEFAULT "/"
+#define ESP_SERVER_PORT_DEFAULT 80
+
+/* Client default */
+#define ESP_CLIENT_SSID "WiFi WaFer"
+#define ESP_CLIENT_PASSWORD "moussedebanana"
+#define ESP_CLIENT_IP_DEFAULT "api.thingspeak.com"
+#define ESP_CLIENT_PATH_DEFAULT "/update"
+#define ESP_CLIENT_PORT_DEFAULT 80
+
+/* Delay */
+#define ESP_SHORT_DELAY (100)
+#define ESP_MEDIUM_DELAY (1000)
+#define ESP_LONG_DELAY (15000)
+
+/* Other */
+#define ESP_CLOSE_ALL (5)
 
 /*************************************************************************************
 * Public prototypes
@@ -71,16 +87,14 @@ class ESP8266
 		{
 			char ssid[33];
 			char password[33];
-      char bssid[33];
-			int16_t rssi;
-      uint8_t channel;
 		};
 
 		struct esp_URL_parameter_t
 		{
 			char host[50];
 			char path[50];
-      char key[33];
+      char auth[50];
+      char client[30];
       uint16_t port;
 		};
 
@@ -95,6 +109,7 @@ class ESP8266
 		*************************************************************************************/
 		ESP8266(int pin = 0);
 		int getAPList(esp_AP_list_t* apList, int apList_size = 20);
+    uint32_t getUnixTimestamp(void);
 		bool setAP(esp_mode_t mode, const esp_AP_parameter_t &AP);
 		bool config(esp_mode_t mode);
 		bool checkWifi(uint32_t retries, uint32_t delayMS, esp_AP_parameter_t &AP);
@@ -110,10 +125,6 @@ class ESP8266
 		*************************************************************************************/
 		int enablePin;
 };
-
-#else
-  #warning WiFi desabilitado
-#endif /* ESP8266_ENABLE */
 
 /** @} */
 #endif /* _ESP8266_H_ */

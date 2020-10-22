@@ -5,13 +5,9 @@
 
 #ifdef ESP8266_ENABLE
 
-/*************************************************************************************
-* Private enumeration
-*************************************************************************************/
-enum sleep_wakeup_t
-{
-	SLEEP = 0,
-	WAKEUP
+const ESP8266::esp_AP_parameter_t espDefaultApServer = {
+    ESP_SERVER_SSID,
+    ESP_SERVER_PASSWORD,
 };
 
 /*******************************************************************************
@@ -47,7 +43,7 @@ int ESP8266::getAPList(esp_AP_list_t* apList, int apList_size)
     /* Obt�m lista de APs dispon�veis, separando os par�metros obtidos da lista */
     serial_flush();
     Serial.write("AT+CWLAP\r\n");
-    serial_get((char*) "\r\n", 1000, serialBuffer, sizeof(serialBuffer));
+    serial_get((char*) "\r\n", ESP_MEDIUM_DELAY, serialBuffer, sizeof(serialBuffer));
     do
     {
         char* tkn = strtok(serialBuffer, "\"");
@@ -81,7 +77,7 @@ int ESP8266::getAPList(esp_AP_list_t* apList, int apList_size)
 
         /* Obt�m pr�xima rede */
         memset(serialBuffer,0,sizeof(serialBuffer));
-        serial_get((char*) "\r\n", 100, serialBuffer, sizeof(serialBuffer));
+        serial_get((char*) "\r\n", ESP_SHORT_DELAY, serialBuffer, sizeof(serialBuffer));
 
     } while(true);
     
@@ -105,6 +101,41 @@ int ESP8266::getAPList(esp_AP_list_t* apList, int apList_size)
 
     serial_flush();
     return n_aps;
+}
+
+/*******************************************************************************
+   getUnixTimestamp
+****************************************************************************//**
+ * @brief Gets unix timestamp from server
+ * @param void.
+ * @return uint32_t timestamp.
+*******************************************************************************/
+uint32_t ESP8266::getUnixTimestamp(void)
+{
+    union Timestamp
+    {
+        uint8_t u8[4];
+        uint32_t u32;
+    };
+    Timestamp timestamp;
+
+    /* Conecta ao servidor */
+    serial_flush();
+    Serial.write("AT+CIPSTART=0,\"TCP\",\"time.nist.gov\",37\r\n");
+    if(!serial_get((char*) "+IPD,0,4:", ESP_LONG_DELAY, NULL, 0))
+        return 0;
+
+    /* Obtém timestamp */
+    uint8_t buffer[4];
+    if(!Serial.readBytes(buffer, sizeof(buffer)))
+        return 0;
+
+    /* Converte para segundos UNIX */
+    timestamp.u8[3] = buffer[0];
+    timestamp.u8[2] = buffer[1];
+    timestamp.u8[1] = buffer[2];
+    timestamp.u8[0] = buffer[3];
+    return (timestamp.u32 - 2208988800ul);
 }
 
 /*******************************************************************************
@@ -134,7 +165,7 @@ bool ESP8266::setAP(esp_mode_t mode, const esp_AP_parameter_t &AP)
         Serial.write("\",\"");
         Serial.write(AP.password);
         Serial.write("\"\r\n");
-        return serial_get("OK\r\n", 2500, NULL, 0); /* timeout: 10s */
+        return serial_get("OK\r\n", ESP_LONG_DELAY, NULL, 0); /* timeout: 15s */
       } break;
       
       case ESP_SERVER_MODE:
@@ -145,7 +176,7 @@ bool ESP8266::setAP(esp_mode_t mode, const esp_AP_parameter_t &AP)
         Serial.write("\",\"");
         Serial.write(AP.password);
         Serial.write("\",6,0\r\n");
-        return serial_get((char*) "OK\r\n", 100, NULL, 0);    
+        return serial_get((char*) "OK\r\n", ESP_LONG_DELAY, NULL, 0);    
       } break;
       
       default:
@@ -167,41 +198,47 @@ bool ESP8266::config(esp_mode_t mode)
     char strBuffer[100];
     uint32_t delayMS = 250;
 
-    /* Inicializa serial em 9600 baud/s */
+    /* Inicializa serial em 57600 baud/s */
     Serial.end();
     Serial.begin(57600);
     
     /* Reset do módulo WiFi */
-    DESATIVA_ESP;
+    ESP_DESATIVA;
     delay(delayMS);
-    ATIVA_ESP;
+    ESP_ATIVA;
+
     /* Delay para inicializa��o */
-    delay(1000);
+    delay(ESP_MEDIUM_DELAY);
 
     /* Remove mensagem de eco da serial */
     Serial.print("ATE0\r\n");
-    delay(delayMS);
+    delay(ESP_SHORT_DELAY);
                                           
     /* Teste de sanidade do m�dulo ESP8266 */
     /* Valor esperado: 'OK'. Timeout: 100ms. */
     serial_flush();
     Serial.write("AT\r\n");
-    if(!serial_get((char*) "OK\r\n", 100, NULL, 0))
+    if(!serial_get((char*) "OK\r\n", ESP_SHORT_DELAY, NULL, 0))
         return false;
 
     /* Conexoes multiplas = TRUE */
     Serial.write("AT+CIPMUX=1\r\n");
-    if(!serial_get((char*) "OK\r\n", 100, NULL, 0))
+    if(!serial_get((char*) "OK\r\n", ESP_SHORT_DELAY, NULL, 0))
         return false;
 
     /* Define modo de operação */
     /* 'client' / 'server' / 'client' & 'server' */
     sprintf(strBuffer, "AT+CWMODE_DEF=%d\r\n", mode);
     Serial.write(strBuffer);
-    if(!serial_get((char*) "OK\r\n", 100, NULL, 0))
+    if(!serial_get((char*) "OK\r\n", ESP_SHORT_DELAY, NULL, 0))
 	      return false;
 
-	  serial_flush();
+    /* Tamanho do buffer SSL */
+    Serial.write("AT+CIPSSLSIZE=4096\r\n");
+    if(!serial_get((char*) "OK\r\n", ESP_SHORT_DELAY, NULL, 0))
+	      return false;
+
+    serial_flush();
     return true;
 }
 
@@ -223,7 +260,7 @@ bool ESP8266::checkWifi(uint32_t retries, uint32_t delayMS, esp_AP_parameter_t &
     {
         serial_flush();
         Serial.write("AT+CWJAP_DEF?\r\n");
-        serial_get((char*) "\r\n", 100, strBuffer, sizeof(strBuffer)); // Timeout: 100ms.
+        serial_get((char*) "\r\n", ESP_SHORT_DELAY, strBuffer, sizeof(strBuffer)); // Timeout: 100ms.
 
         if(strstr(strBuffer,"+CWJAP_DEF:")) // Valor esperado: '+CWJAP_DEF:'.
             return true;
@@ -246,12 +283,12 @@ bool ESP8266::checkWifi(uint32_t retries, uint32_t delayMS, esp_AP_parameter_t &
 bool ESP8266::connect(esp_URL_parameter_t &url)
 {
     char strBuffer[100];
-    sprintf(strBuffer, "AT+CIPSTART=0,\"TCP\",\"%s\",%u\r\n", url.host, url.port);
+    sprintf(strBuffer, "AT+CIPSTART=0,\"SSL\",\"%s\",%u\r\n", url.host, url.port);
     
     /* Conecta ao servidor */
     serial_flush();
     Serial.write(strBuffer); //AT: Connect to the cloud.
-    return serial_get((char*) "CONNECT\r\n", 1000, NULL, 0); // Valor esperado: 'CONNECT'. Timeout: 1s.
+    return serial_get((char*) "CONNECT\r\n", ESP_LONG_DELAY, NULL, 0); // Valor esperado: 'CONNECT'. Timeout: 15s.
 }
 
 /*******************************************************************************
@@ -269,13 +306,13 @@ bool ESP8266::server(esp_URL_parameter_t &url)
     char strBuffer[100];
     sprintf(strBuffer, "AT+CIPAP=\"%s\"\r\n", url.host);
     Serial.write(strBuffer);
-    if(!serial_get((char*) "OK\r\n", 100, NULL, 0))
+    if(!serial_get((char*) "OK\r\n", ESP_SHORT_DELAY, NULL, 0))
        return false;
   
     /* Inicializar AP */
     sprintf(strBuffer, "AT+CIPSERVER=1,%u\r\n", url.port);
     Serial.write(strBuffer);
-    return serial_get((char*) "OK\r\n", 100, NULL, 0);
+    return serial_get((char*) "OK\r\n", ESP_SHORT_DELAY, NULL, 0);
 }
 
 /*******************************************************************************
@@ -292,7 +329,7 @@ bool ESP8266::close(uint8_t connection)
     Serial.print("AT+CIPCLOSE=");
     Serial.print(connection);
     Serial.print("\r\n");
-    return serial_get((char*) "CLOSED\r\n", 100, NULL, 0); // Valor esperado: "CLOSED". Timeout: 100ms.
+    return serial_get((char*) "CLOSED\r\n", ESP_SHORT_DELAY, NULL, 0); // Valor esperado: "CLOSED". Timeout: 100ms.
 }
 
 /*******************************************************************************
@@ -308,8 +345,8 @@ void ESP8266::sleep()
   /* Caso n�o aceite comando, for�a pino de reset */
   serial_flush();
   Serial.write("AT+GSLP=0\r\n");
-  if(!serial_get((char*) "OK\r\n", 100, NULL, 0));
-      DESATIVA_ESP;
+  if(!serial_get((char*) "OK\r\n", ESP_SHORT_DELAY, NULL, 0));
+      ESP_DESATIVA;
 }
 
 /*******************************************************************************
@@ -321,9 +358,9 @@ void ESP8266::sleep()
 *******************************************************************************/
 void ESP8266::wakeup()
 {
-  DESATIVA_ESP;
+  ESP_DESATIVA;
   delay(50);
-  ATIVA_ESP;
+  ESP_ATIVA;
   delay(250);
   
   /* Remove mensagem de eco da serial */

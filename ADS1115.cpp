@@ -50,7 +50,7 @@ void ADS1115::readData(ADS1115_data_t* data)
   
     /* Recebe dados do ADC */
     /* Converte uint8_t em int16_t */
-  	for(int i=0; i<data->data_size; i++)
+  	for(uint16_t i=0; i<data->data_size; i++)
     {
         /* Recepção */
         /* Req. Leitura de 2 Bytes */
