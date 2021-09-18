@@ -48,6 +48,9 @@ void ADS1115::readData(ADS1115_data_t* data)
     if((data->data_size) > ADS1115_max_buffer_size)
         return;
   
+    /* Contador para timeout */
+    uint16_t counter = UINT16_MAX;
+
     /* Recebe dados do ADC */
     /* Converte uint8_t em int16_t */
   	for(uint16_t i=0; i<data->data_size; i++)
@@ -56,7 +59,10 @@ void ADS1115::readData(ADS1115_data_t* data)
         /* Req. Leitura de 2 Bytes */
         uint8_t dataRaw[2] = {0,0};
         Wire.requestFrom(data->i2c_addr, 2);
-        while(!Wire.available()) {};
+        while(!Wire.available()) {
+            if(0 == counter--)
+                return;
+        };
         dataRaw[0] = Wire.read();
         dataRaw[1] = Wire.read();
         data->data_byte[i] =  (dataRaw[0] << 8) | (dataRaw[1]);
