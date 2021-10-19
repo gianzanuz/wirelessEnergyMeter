@@ -15,6 +15,7 @@
 /* Types */
 #define MEASURE_ELECTRICAL_CURRENT_AMPERE (0x50)
 #define MEASURE_ELECTRICAL_ENERGY_KHW (0x70)
+#define MEASURE_ENERGY_COST_REAIS (0x80)
 
 /* Chave bipolar */
 #define SWT1 (3)
@@ -33,7 +34,7 @@
 #define ESP_CLIENT_PASSWORD "janismexerica19"
 
 /* Período de publicação */
-#define MESSAGE_SAMPLE_RATE (180)
+#define MESSAGE_SAMPLE_RATE (60)
 
 /* EEPROM */
 #define EEPROM_ESP_AP_OFFSET (0)
@@ -54,22 +55,24 @@
 *************************************************************************************/
 /* Módulo WiFi ESP8266 */
 /* Pino de Enable = 2 */
-ESP8266 esp(ESP_ENABLE_PIN);
-ESP8266::esp_URL_parameter_t espUrl = {
+static ESP8266 esp(ESP_ENABLE_PIN);
+static ESP8266::esp_URL_parameter_t espUrl = {
     FIREBASE_HOST,
-    FIREBASE_PATH,
     FIREBASE_AUTH,
     FIREBASE_CLIENT};
-ESP8266::esp_AP_parameter_t espAp = {
+static ESP8266::esp_AP_parameter_t espAp = {
     ESP_CLIENT_SSID,
     ESP_CLIENT_PASSWORD,
 };
 
 /* LCD 16x2 */
-LiquidCrystal lcd(10, 11, 6, 7, 8, 9);
+static LiquidCrystal lcd(10, 11, 6, 7, 8, 9);
 
 /* Energia para cada canal */
-Energy energy[CHANNEL_SIZE] = {Energy(CHANNEL_1), Energy(CHANNEL_2)};
+static Energy energy[CHANNEL_SIZE] = {Energy(CHANNEL_1), Energy(CHANNEL_2)};
+
+/* Timestamp atual */
+static uint32_t timestamp = 0;
 
 /*************************************************************************************
   Public prototypes
@@ -128,7 +131,7 @@ void setup()
 #endif
 
   /* Configuração inicial do ESP */
-  if (!esp.config(ESP8266::ESP_CLIENT_MODE))
+  if (!esp.config())
   {
     LCD_print(F("ESP CONFIG:"), F("ERROR"));
 
@@ -138,39 +141,23 @@ void setup()
   }
   LCD_print(F("ESP CONFIG:"), F("OK"), 1000);
 
-  /* Inicializa servidor */
-  if (!esp.server())
-  {
-    LCD_print(F("SERVER INIT:"), F("ERROR"));
-
-    /* Aplica um soft-reset após delay */
-    delay(60000);
-    softReset();
-  }
-  LCD_print(F("SERVER INIT:"), F("OK"), 1000);
-
   /* Obtém AP da EEPROM, caso haja */
-  if (EEPROM_read((uint8_t *) &espAp, sizeof(espAp), EEPROM_ESP_AP_OFFSET))
-  {
-#ifdef LCD_ENABLE
+  if (EEPROM_read((uint8_t *)&espAp, sizeof(espAp), EEPROM_ESP_AP_OFFSET))
     LCD_print(F("EEPROM FOUND:"), F("AP"), 1000);
-
-    lcd.clear();
-    lcd.print(F("ssid: "));
-    lcd.print(espAp.ssid);
-    lcd.setCursor(0, 1);
-    lcd.print(F("pass: "));
-    lcd.print(espAp.password);
-    delay(1000);
-#endif
-  }
   else
-  {
     LCD_print(F("EEPROM NOT FOUND:"), F("AP"), 1000);
-  }
+
+#ifdef LCD_ENABLE
+  /* Imprime configuração AP atual */
+  lcd.clear();
+  lcd.print(espAp.ssid);
+  lcd.setCursor(0, 1);
+  lcd.print(espAp.password);
+  delay(3000);
+#endif
 
   /* Conecta ao AP */
-  if (!esp.setAP(ESP8266::ESP_CLIENT_MODE, espAp))
+  if (!esp.connect_ap(espAp))
   {
     LCD_print(F("ESP AP:"), F("ERROR"));
 
@@ -180,72 +167,82 @@ void setup()
   }
   LCD_print(F("ESP AP:"), F("OK"), 1000);
 
-  /* Obtém URL da EEPROM, caso haja */
-  if (EEPROM_read((uint8_t *) &espUrl, sizeof(espUrl), EEPROM_ESP_URL_OFFSET))
+  /* Obtém timestamp atual */
+  while ((timestamp = esp.getUnixTimestamp()) == 0)
   {
+    LCD_print(F("ESP TIMESTAMP:"), F("ERROR"));
+    esp.close(ESP_CLOSE_ALL);
+
+    /* Aplica um delay */
+    delay(5000);
+  }
 #ifdef LCD_ENABLE
-    LCD_print(F("EEPROM FOUND:"), F("SERVER"), 1000);
-
-    lcd.clear();
-    lcd.print(F("host: "));
-    lcd.print(espUrl.host);
-    lcd.setCursor(0, 1);
-    lcd.print(F("path: "));
-    lcd.print(espUrl.path);
-    delay(1000);
-
-    lcd.clear();
-    lcd.print(F("auth: "));
-    lcd.print(espUrl.auth);
-    lcd.setCursor(0, 1);
-    lcd.print(F("client: "));
-    lcd.print(espUrl.client);
-    delay(1000);
+  lcd.clear();
+  lcd.print(F("ESP TIMESTAMP:"));
+  lcd.setCursor(0, 1);
+  lcd.print(timestamp);
+  delay(3000);
 #endif
-  }
-  else
-  {
-    LCD_print(F("EEPROM NOT FOUND:"), F("SERVER"), 1000);
-  }
 
-  /* Obtém URL da EEPROM, caso haja */
-  if (EEPROM_read((uint8_t *) &energy[CHANNEL_1].config, sizeof(energy[CHANNEL_1].config), EEPROM_ENERGY_OFFSET))
+  /* Obtém SERVER da EEPROM, caso haja */
+  if (EEPROM_read((uint8_t *)&espUrl, sizeof(espUrl), EEPROM_ESP_URL_OFFSET))
+    LCD_print(F("EEPROM FOUND:"), F("SERVER"), 1000);
+  else
+    LCD_print(F("EEPROM NOT FOUND:"), F("SERVER"), 1000);
+
+#ifdef LCD_ENABLE
+  /* Imprime configuração SERVER atual */
+  lcd.clear();
+  lcd.print(espUrl.host);
+  delay(3000);
+
+  lcd.clear();
+  lcd.print(espUrl.auth);
+  lcd.setCursor(0, 1);
+  lcd.print(espUrl.client);
+  delay(3000);
+#endif
+
+  /* Obtém ENERGY da EEPROM, caso haja */
+  if (EEPROM_read((uint8_t *)&energy[CHANNEL_1].config, sizeof(energy[CHANNEL_1].config), EEPROM_ENERGY_OFFSET))
   {
     /* Duplica para o segundo canal */
     energy[CHANNEL_2].config = energy[CHANNEL_1].config;
-
-#ifdef LCD_ENABLE
     LCD_print(F("EEPROM FOUND:"), F("ENERGY"), 1000);
-
-    lcd.clear();
-    lcd.print(F("dataSize: "));
-    lcd.print(energy[CHANNEL_1].config.dataSize);
-    lcd.setCursor(0, 1);
-    lcd.print(F("scale: "));
-    lcd.print(energy[CHANNEL_1].config.scale);
-    delay(1000);
-
-    lcd.clear();
-    lcd.print(F("basePrice: "));
-    lcd.print(energy[CHANNEL_1].config.basePrice);
-    lcd.setCursor(0, 1);
-    lcd.print(F("flagPrice: "));
-    lcd.print(energy[CHANNEL_1].config.flagPrice);
-    delay(1000);
-
-    lcd.clear();
-    lcd.print(F("lineVoltage: "));
-    lcd.print(energy[CHANNEL_1].config.lineVoltage);
-    lcd.setCursor(0, 1);
-    lcd.print(F("powerFactor: "));
-    lcd.print(energy[CHANNEL_1].config.powerFactor);
-    delay(1000);
-#endif
   }
   else
-  {
     LCD_print(F("EEPROM NOT FOUND:"), F("ENERGY"), 1000);
-  }
+
+#ifdef LCD_ENABLE
+  /* Imprime configuração ENERGY atual */
+  lcd.clear();
+  lcd.print(F("dataSize: "));
+  lcd.print(energy[CHANNEL_1].config.dataSize);
+  lcd.setCursor(0, 1);
+  lcd.print(F("scale: "));
+  lcd.print(energy[CHANNEL_1].config.scale);
+  delay(3000);
+
+  lcd.clear();
+  lcd.print(F("basePrice: "));
+  lcd.print(energy[CHANNEL_1].config.basePrice);
+  lcd.setCursor(0, 1);
+  lcd.print(F("flagPrice: "));
+  lcd.print(energy[CHANNEL_1].config.flagPrice);
+  delay(3000);
+
+  lcd.clear();
+  lcd.print(F("lineVoltage: "));
+  lcd.print(energy[CHANNEL_1].config.lineVoltage);
+  lcd.setCursor(0, 1);
+  lcd.print(F("powerFactor: "));
+  lcd.print(energy[CHANNEL_1].config.powerFactor);
+  delay(3000);
+#endif
+
+  /* Atualiza timestamp inicial */
+  energy[CHANNEL_1].calculate(timestamp);
+  energy[CHANNEL_2].calculate(timestamp);
 
   /* Habilita watchdog */
   wdt_enable(WDTO_8S);
@@ -264,12 +261,25 @@ void loop()
   uint32_t currentMillis = millis();
   if ((uint32_t)(currentMillis - previousMillis) > ((uint32_t)MESSAGE_SAMPLE_RATE * 1000))
   {
+    /* Incrementa a timestamp */
+    /* Atualiza tempo decorrido */
+    timestamp += (currentMillis - previousMillis) / 1000;
+    previousMillis = currentMillis;
+
+    /* Finaliza o cálculo de energia elétrica */
+    energy[CHANNEL_1].calculate(timestamp);
+    energy[CHANNEL_2].calculate(timestamp);
+
+    /* Desativa servidor */
+    esp.server_stop();
+
     /* Envia para servidores */
     IOT_connect();
-    serial_flush();
 
-    /* Atualiza tempo decorrido */
-    previousMillis = currentMillis;
+    /* Ativa servidor */
+    esp.server_start();
+
+    serial_flush();
   }
 
   /* Verifica se houve conexão ao servidor do ESP8266 */
@@ -284,12 +294,15 @@ void loop()
 #ifdef LCD_REFRESH_MEASURE
   /* Mostra na tela a cada 50 interações */
   uint32_t rmsCount = energy[CHANNEL_1].getRmsCount();
-  if (!(rmsCount % 50))
+  if (!(rmsCount % 10))
   {
     lcd.clear();
-    lcd.print("I: " + String((energy[CHANNEL_1].getRmsSum() + energy[CHANNEL_2].getRmsSum()) / rmsCount) + " A rms");
+    lcd.print("I: ");
+    lcd.print(energy[CHANNEL_1].getRmsLast() + energy[CHANNEL_2].getRmsLast(), 1);
+    lcd.print(" A");
     lcd.setCursor(0, 1);
-    lcd.print("C: " + String(rmsCount));
+    lcd.print("C: ");
+    lcd.print(rmsCount);
   }
 #endif
 #endif
@@ -314,21 +327,6 @@ bool IOT_connect()
   }
   LCD_print(F("ESP CONNECT AP:"), F("OK"));
 
-  /* Obtém timestamp atual */
-  uint32_t timestamp = esp.getUnixTimestamp();
-  if (!timestamp)
-  {
-    LCD_print(F("ESP TIMESTAMP:"), F("ERROR"));
-    esp.close(ESP_CLOSE_ALL);
-    return false;
-  }
-#ifdef LCD_ENABLE
-  lcd.clear();
-  lcd.print(F("ESP TIMESTAMP:"));
-  lcd.setCursor(0, 1);
-  lcd.print(timestamp);
-#endif
-
   /* Abre conexão com servidor */
   if (!esp.connect(espUrl))
   {
@@ -338,15 +336,10 @@ bool IOT_connect()
   }
   LCD_print(F("ESP CONNECT:"), F("OK"));
 
-  /* Finaliza o cálculo de energia elétrica */
-  energy[0].calculate(timestamp);
-  energy[1].calculate(timestamp);
-
   /* Envia conteudo */
-  if (IOT_send_POST(CHANNEL_1, energy[CHANNEL_1].getElectricCurrentAmperes(), MEASURE_ELECTRICAL_CURRENT_AMPERE, timestamp) &&
-      IOT_send_POST(CHANNEL_2, energy[CHANNEL_2].getElectricCurrentAmperes(), MEASURE_ELECTRICAL_CURRENT_AMPERE, timestamp) &&
-      IOT_send_POST(CHANNEL_1, energy[CHANNEL_1].getEnergyAccumulatedKiloWattsHour(), MEASURE_ELECTRICAL_ENERGY_KHW, timestamp) &&
-      IOT_send_POST(CHANNEL_2, energy[CHANNEL_2].getEnergyAccumulatedKiloWattsHour(), MEASURE_ELECTRICAL_ENERGY_KHW, timestamp))
+  if (IOT_send_POST(energy[CHANNEL_1].getElectricCurrentAmperes() + energy[CHANNEL_2].getElectricCurrentAmperes(), MEASURE_ELECTRICAL_CURRENT_AMPERE, timestamp) &&
+      IOT_send_POST(energy[CHANNEL_1].getEnergyAccumulatedKiloWattsHour() + energy[CHANNEL_2].getEnergyAccumulatedKiloWattsHour(), MEASURE_ELECTRICAL_ENERGY_KHW, timestamp) &&
+      IOT_send_POST(energy[CHANNEL_1].getCostAccumulatedReais() + energy[CHANNEL_2].getCostAccumulatedReais(), MEASURE_ENERGY_COST_REAIS, timestamp))
   {
     LCD_print(F("ESP SEND:"), F("OK"));
     esp.close(ESP_CLOSE_ALL);
@@ -367,7 +360,7 @@ bool IOT_connect()
   .
 
 ************************************************************************************/
-bool IOT_send_POST(uint8_t channel, float value, uint8_t type, uint32_t timestamp)
+bool IOT_send_POST(float value, uint8_t type, uint32_t timestamp)
 {
   /* Sequencial number */
   static uint32_t seqNumber = 0;
@@ -376,10 +369,7 @@ bool IOT_send_POST(uint8_t channel, float value, uint8_t type, uint32_t timestam
   serial_flush();
   Serial.print(F("AT+CIPSENDEX=0,2047\r\n"));
   if (!serial_get(">", 100, NULL, 0)) /* Aguarda '>' */
-  {
-    esp.close(ESP_CLOSE_ALL);
     return false;
-  }
 
   /* HTTP HEADERS */
   /* HTTP POST */
@@ -387,7 +377,16 @@ bool IOT_send_POST(uint8_t channel, float value, uint8_t type, uint32_t timestam
   Serial.print(F("POST /users/"));
   Serial.print(espUrl.client);
   Serial.print(F("/measures/"));
-  Serial.print((type == MEASURE_ELECTRICAL_CURRENT_AMPERE) ? F("current") : F("energy"));
+
+  if (type == MEASURE_ELECTRICAL_CURRENT_AMPERE)
+    Serial.print(F("current"));
+  else if (type == MEASURE_ELECTRICAL_ENERGY_KHW)
+    Serial.print(F("energy"));
+  else if (type == MEASURE_ENERGY_COST_REAIS)
+    Serial.print(F("cost"));
+  else
+    return false;
+
   Serial.print(F(".json?auth="));
   Serial.print(espUrl.auth);
   Serial.print(F(" HTTP/1.1\r\n"));
@@ -405,10 +404,6 @@ bool IOT_send_POST(uint8_t channel, float value, uint8_t type, uint32_t timestam
   /* Formata body */
   char buffer[50];
   sprintf(buffer, "{\"value\":%s,\r\n", String(value, 5).c_str());
-  Serial.println(strlen(buffer) - 2, HEX);
-  Serial.print(buffer);
-
-  sprintf(buffer, "\"channel\":%u,\r\n", channel);
   Serial.println(strlen(buffer) - 2, HEX);
   Serial.print(buffer);
 
@@ -437,10 +432,8 @@ bool IOT_send_POST(uint8_t channel, float value, uint8_t type, uint32_t timestam
   /* Return */
   serial_get("SEND OK", 1000, NULL, 0);
   if (!serial_get("HTTP/1.1 200 OK\r\n", 1000, NULL, 0))
-  {
-    esp.close(ESP_CLOSE_ALL);
     return false;
-  }
+
   return true;
 }
 
@@ -508,9 +501,8 @@ void WEB_init()
     }
 
     /* Varre todos os parâmetros do header, até encontrar o body com a mensagem do POST */
-    while (serial_get("\r\n", 100, strBuffer, sizeof(strBuffer)))
-    {
-    };
+    serial_get("\r\n\r\n", 500, NULL, 0);
+    serial_get("\r\n", 500, strBuffer, sizeof(strBuffer));
 
     /* Inicializa POST */
     WEB_process_POST(connection, path, strBuffer, sizeof(strBuffer));
@@ -552,7 +544,7 @@ void WEB_init()
 ************************************************************************************/
 bool WEB_process_GET(uint8_t connection, char *path, char *parameter, uint32_t parameterSize)
 {
-  LCD_print(F("ESP SERVER:"), F("GET"));
+  LCD_print(F("ESP SERVER:"), F("GET"), 1000);
 
   /* WIFI */
   if (!strcmp(path, "/wifi.json"))
@@ -562,12 +554,12 @@ bool WEB_process_GET(uint8_t connection, char *path, char *parameter, uint32_t p
       return false;
 
     /* ssid */
-    sprintf(parameter, "{\"ssid\":%s,\r\n", espAp.ssid);
+    sprintf(parameter, "{\"ssid\":\"%s\",\r\n", espAp.ssid);
     Serial.println(strlen(parameter) - 2, HEX);
     Serial.print(parameter);
 
     /* password */
-    sprintf(parameter, "\"password\":%s}\r\n", espAp.password);
+    sprintf(parameter, "\"password\":\"%s\"}\r\n", espAp.password);
     Serial.println(strlen(parameter) - 2, HEX);
     Serial.print(parameter);
 
@@ -585,11 +577,6 @@ bool WEB_process_GET(uint8_t connection, char *path, char *parameter, uint32_t p
 
     /* host */
     sprintf(parameter, "{\"host\":\"%s\",\r\n", espUrl.host);
-    Serial.println(strlen(parameter) - 2, HEX);
-    Serial.print(parameter);
-
-    /* path */
-    sprintf(parameter, "\"path\":\"%s\",\r\n", espUrl.path);
     Serial.println(strlen(parameter) - 2, HEX);
     Serial.print(parameter);
 
@@ -636,12 +623,12 @@ bool WEB_process_GET(uint8_t connection, char *path, char *parameter, uint32_t p
     Serial.print(parameter);
 
     /* basePrice */
-    sprintf(parameter, "\"basePrice\":%f,\r\n", (double)energy[0].config.basePrice);
+    sprintf(parameter, "\"basePrice\":%s,\r\n", String(energy[0].config.basePrice, 3).c_str());
     Serial.println(strlen(parameter) - 2, HEX);
     Serial.print(parameter);
 
     /* flagPrice */
-    sprintf(parameter, "\"flagPrice\":%f}\r\n", (double)energy[0].config.flagPrice);
+    sprintf(parameter, "\"flagPrice\":%s}\r\n", String(energy[0].config.flagPrice, 3).c_str());
     Serial.println(strlen(parameter) - 2, HEX);
     Serial.print(parameter);
 
@@ -686,28 +673,24 @@ bool WEB_process_GET(uint8_t connection, char *path, char *parameter, uint32_t p
 ************************************************************************************/
 bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodySize)
 {
-  LCD_print(F("ESP SERVER:"), F("POST"));
+  LCD_print(F("ESP SERVER:"), F("POST"), 1000);
 
   /* Verifica o início do objeto */
-  char *tkn = strtok(body, "{");
-  if (!tkn)
+  if (body[0] != '{')
   {
     WEB_400_bad_request(connection);
     return false;
   }
 
+  /* Início do json */
+  char *tkn = body + 1;
+
   /* WIFI */
   if (strstr(path, "/wifi.json"))
   {
     /* Para cada campo do objeto */
-    while (true)
+    while ((tkn = strtok(tkn, "\"")) != NULL)
     {
-      /* Obtém key */
-      strtok(NULL, "\"");
-      tkn = strtok(NULL, "\"");
-      if (!tkn)
-        break;
-
       /* SSID */
       if (!strcmp(tkn, "ssid"))
       {
@@ -724,6 +707,9 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
         url_decode(tkn, espAp.password, sizeof(espAp.password)); /* Decodifica caracteres especiais */
         str_safe(espAp.password, sizeof(espAp.password));        /* Torna a string 'segura' */
       }
+
+      /* Continua parser */
+      tkn = NULL;
     }
 
     /* Salva AP na EEPROM */
@@ -734,12 +720,11 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
       LCD_print(F("EEPROM SAVED:"), F("AP"), 1000);
 
       lcd.clear();
-      lcd.print(F("SSID: "));
       lcd.print(espAp.ssid);
       lcd.setCursor(0, 1);
-      lcd.print(F("pass: "));
       lcd.print(espAp.password);
-      delay(1000);
+      delay(3000);
+      wdt_reset();
 #endif
     }
   }
@@ -748,14 +733,8 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
   if (strstr(path, "/servers.json"))
   {
     /* Para cada campo do objeto */
-    while (true)
+    while ((tkn = strtok(tkn, "\"")) != NULL)
     {
-      /* Obtém key */
-      strtok(NULL, "\"");
-      tkn = strtok(NULL, "\"");
-      if (!tkn)
-        break;
-
       /* host */
       if (!strcmp(tkn, "host"))
       {
@@ -763,14 +742,6 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
         tkn = strtok(NULL, "\"");
         url_decode(tkn, espUrl.host, sizeof(espUrl.host)); /* Decodifica caracteres especiais */
         str_safe(espUrl.host, sizeof(espUrl.host));        /* Torna a string 'segura' */
-      }
-      /* path */
-      else if (!strcmp(tkn, "path"))
-      {
-        strtok(NULL, "\"");
-        tkn = strtok(NULL, "\"");
-        url_decode(tkn, espUrl.path, sizeof(espUrl.path)); /* Decodifica caracteres especiais */
-        str_safe(espUrl.path, sizeof(espUrl.path));        /* Torna a string 'segura' */
       }
       /* auth */
       else if (!strcmp(tkn, "auth"))
@@ -788,6 +759,9 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
         url_decode(tkn, espUrl.client, sizeof(espUrl.client)); /* Decodifica caracteres especiais */
         str_safe(espUrl.client, sizeof(espUrl.client));        /* Torna a string 'segura' */
       }
+
+      /* Continua parser */
+      tkn = NULL;
     }
 
     /* Salva URL na EEPROM */
@@ -798,20 +772,16 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
       LCD_print(F("EEPROM SAVED:"), F("SERVER"), 1000);
 
       lcd.clear();
-      lcd.print(F("host: "));
       lcd.print(espUrl.host);
-      lcd.setCursor(0, 1);
-      lcd.print(F("path: "));
-      lcd.print(espUrl.path);
-      delay(1000);
+      delay(3000);
+      wdt_reset();
 
       lcd.clear();
-      lcd.print(F("auth: "));
       lcd.print(espUrl.auth);
       lcd.setCursor(0, 1);
-      lcd.print(F("client: "));
       lcd.print(espUrl.client);
-      delay(1000);
+      delay(3000);
+      wdt_reset();
 #endif
     }
   }
@@ -820,62 +790,53 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
   if (strstr(path, "/energy.json"))
   {
     /* Para cada campo do objeto */
-    while (true)
+    while ((tkn = strtok(tkn, "\"")) != NULL)
     {
-      /* Obtém key */
-      strtok(NULL, "\"");
-      tkn = strtok(NULL, "\"");
-      if (!tkn)
-        break;
-
       /* dataSize */
       if (!strcmp(tkn, "dataSize"))
       {
-        strtok(NULL, ":");
-        tkn = strtok(NULL, ",}");
+        tkn = strtok(NULL, ":,}");
         energy[0].config.dataSize = atoi(tkn);
         energy[1].config.dataSize = atoi(tkn);
       }
       /* scale */
       else if (!strcmp(tkn, "scale"))
       {
-        strtok(NULL, ":");
-        tkn = strtok(NULL, ",}");
+        tkn = strtok(NULL, ":,}");
         energy[0].config.scale = atoi(tkn);
         energy[1].config.scale = atoi(tkn);
       }
       /* lineVoltage */
       else if (!strcmp(tkn, "lineVoltage"))
       {
-        strtok(NULL, ":");
-        tkn = strtok(NULL, ",}");
+        tkn = strtok(NULL, ":,}");
         energy[0].config.lineVoltage = atoi(tkn);
         energy[1].config.lineVoltage = atoi(tkn);
       }
       /* powerFactor */
       else if (!strcmp(tkn, "powerFactor"))
       {
-        strtok(NULL, ":");
-        tkn = strtok(NULL, ",}");
+        tkn = strtok(NULL, ":,}");
         energy[0].config.powerFactor = atoi(tkn);
         energy[1].config.powerFactor = atoi(tkn);
       }
       /* basePrice */
       else if (!strcmp(tkn, "basePrice"))
       {
-        strtok(NULL, ":");
-        tkn = strtok(NULL, ",}");
+        tkn = strtok(NULL, ":,}");
         energy[0].config.basePrice = atof(tkn);
         energy[1].config.basePrice = atof(tkn);
       }
       /* flagPrice */
       else if (!strcmp(tkn, "flagPrice"))
       {
-        strtok(NULL, ":");
-        tkn = strtok(NULL, ",}");
+        tkn = strtok(NULL, ":,}");
         energy[0].config.flagPrice = atof(tkn);
         energy[1].config.flagPrice = atof(tkn);
       }
+
+      /* Continua parser */
+      tkn = NULL;
     }
 
     /* Salva URL na EEPROM */
@@ -883,23 +844,35 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
     if (EEPROM_write((uint8_t *)&energy[0].config, sizeof(energy[0].config), EEPROM_ENERGY_OFFSET))
     {
 #ifdef LCD_ENABLE
-      LCD_print(F("EEPROM SAVED:"), F("SERVER"), 1000);
+      LCD_print(F("EEPROM SAVED:"), F("ENERGY"), 1000);
+
+      /* Imprime configuração SERVER atual */
+      lcd.clear();
+      lcd.print(F("dataSize: "));
+      lcd.print(energy[CHANNEL_1].config.dataSize);
+      lcd.setCursor(0, 1);
+      lcd.print(F("scale: "));
+      lcd.print(energy[CHANNEL_1].config.scale);
+      delay(3000);
+      wdt_reset();
 
       lcd.clear();
-      lcd.print(F("host: "));
-      lcd.print(espUrl.host);
+      lcd.print(F("basePrice: "));
+      lcd.print(energy[CHANNEL_1].config.basePrice, 3);
       lcd.setCursor(0, 1);
-      lcd.print(F("path: "));
-      lcd.print(espUrl.path);
-      delay(1000);
+      lcd.print(F("flagPrice: "));
+      lcd.print(energy[CHANNEL_1].config.flagPrice, 3);
+      delay(3000);
+      wdt_reset();
 
       lcd.clear();
-      lcd.print(F("auth: "));
-      lcd.print(espUrl.auth);
+      lcd.print(F("lineVoltage: "));
+      lcd.print(energy[CHANNEL_1].config.lineVoltage);
       lcd.setCursor(0, 1);
-      lcd.print(F("client: "));
-      lcd.print(espUrl.client);
-      delay(1000);
+      lcd.print(F("powerFactor: "));
+      lcd.print(energy[CHANNEL_1].config.powerFactor);
+      delay(3000);
+      wdt_reset();
 #endif
     }
   }
@@ -991,6 +964,7 @@ bool WEB_chunk_finish(void)
     esp.close(ESP_CLOSE_ALL);
     return false;
   }
+  esp.close(ESP_CLOSE_ALL);
   return true;
 }
 
@@ -1047,6 +1021,10 @@ bool WEB_204_no_content(uint8_t connection)
   /* Header End */
   Serial.print(F("\r\n"));
 
+  /* Finaliza conexão */
+  if(!WEB_chunk_finish())
+    return false;
+
   return true;
 }
 
@@ -1073,6 +1051,10 @@ bool WEB_400_bad_request(uint8_t connection)
   Serial.print(F("Connection: Close\r\n"));
   /* Header End */
   Serial.print(F("\r\n"));
+
+  /* Finaliza conexão */
+  if(!WEB_chunk_finish())
+    return false;
 
   return true;
 }
@@ -1102,12 +1084,25 @@ bool EEPROM_write(const uint8_t *buffer, int size, int addr)
 ************************************************************************************/
 bool EEPROM_read(uint8_t *buffer, int size, int addr)
 {
+  uint8_t *temp = (uint8_t *)malloc(size);
+  if (!temp)
+    return false;
+
   /* Escreve buffer na EEPROM */
   for (int i = 0; i < size; i++)
-    buffer[i] = EEPROM.read(addr++);
+    temp[i] = EEPROM.read(addr++);
 
   /* Verifica CRC8 no final */
-  return (EEPROM.read(addr) == CRC_8(buffer, size, CRC_8_MAXIM_POLY));
+  if (EEPROM.read(addr) != CRC_8(temp, size, CRC_8_MAXIM_POLY))
+  {
+    free(temp);
+    return false;
+  }
+
+  /* Copia o buffer recebido */
+  memcpy(buffer, temp, size);
+  free(temp);
+  return true;
 }
 
 /************************************************************************************
@@ -1135,7 +1130,7 @@ bool serial_get(const char *stringChecked, uint32_t timeout, char *returnBuffer,
 {
   uint16_t position = 0;
   uint16_t returnBufferPosition = 0;
-  uint32_t counter = 0;
+  uint32_t lastMillis = millis();
 
   /* Verifica argumentos de entrada */
   if (stringChecked[position] == '\0' || timeout == 0)
@@ -1186,11 +1181,9 @@ bool serial_get(const char *stringChecked, uint32_t timeout, char *returnBuffer,
       }
     }
 
-    /* Incrementa contador  de timeout */
-    counter++;
-    if (counter >= timeout * 1000)
+    /* Verifica se já passou o limite */
+    if (((uint32_t)millis() - lastMillis) > timeout)
       return false;
-    delayMicroseconds(1);
 
     /* Atualiza watchdog */
     wdt_reset();
@@ -1294,9 +1287,11 @@ void LCD_print(const __FlashStringHelper *line1, const __FlashStringHelper *line
   lcd.setCursor(0, 1);
   lcd.print(line2);
   delay(delayMs);
+  wdt_reset();
 #else
   (void)line1;
   (void)line2;
   delay(delayMs);
+  wdt_reset();
 #endif
 }

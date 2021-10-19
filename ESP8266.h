@@ -69,7 +69,6 @@ public:
 	struct esp_URL_parameter_t
 	{
 		char host[50];
-		char path[50];
 		char auth[50];
 		char client[30];
 	};
@@ -86,11 +85,13 @@ public:
 	ESP8266(int pin = 0);
 	int getAPList(esp_AP_list_t *apList, int apList_size = 20);
 	uint32_t getUnixTimestamp(void);
-	bool setAP(esp_mode_t mode, const esp_AP_parameter_t &AP);
-	bool config(esp_mode_t mode);
+	bool connect_ap(const esp_AP_parameter_t &AP);
+	bool set_ap(const esp_AP_parameter_t &AP);
+	bool config(void);
 	bool checkWifi(void);
-	bool connect(esp_URL_parameter_t &url);
-	bool server(void);
+	bool connect(const esp_URL_parameter_t &url);
+	bool server_start(void);
+	bool server_stop(void);
 	bool close(uint8_t connection);
 	void wakeup(void);
 	void sleep(void);

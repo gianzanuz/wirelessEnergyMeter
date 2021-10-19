@@ -36,6 +36,7 @@ public:
 	float getCostAccumulatedReais(void) { return this->costAccumulatedReais; }
 	uint32_t getRmsCount(void) { return this->rmsCount; }
 	float getRmsSum(void) { return this->rmsSum; }
+	float getRmsLast(void) { return this->rmsLast; }
 
 	struct Config
 	{
@@ -43,7 +44,7 @@ public:
 		uint16_t scale;
 		uint8_t lineVoltage;
 		uint8_t powerFactor;
-		uint8_t reserved0;
+		uint8_t currentDay;
 		uint8_t reserved1;
 		float basePrice;
 		float flagPrice;
@@ -65,9 +66,11 @@ private:
 
 	uint32_t lastTimestamp = 0;
 	float currentAmperes = 0;
+	float currentAccumulatedAmperesHour = 0;
 	float energyAccumulatedKiloWattsHour = 0;
 	float costAccumulatedReais = 0;
 	float rmsSum = 0;
+	float rmsLast = 0;
 	uint32_t rmsCount = 0;
 };
 

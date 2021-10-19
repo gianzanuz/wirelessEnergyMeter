@@ -37,7 +37,7 @@ int ESP8266::getAPList(esp_AP_list_t *apList, int apList_size)
 
     /* Obt�m lista de APs dispon�veis, separando os par�metros obtidos da lista */
     serial_flush();
-    Serial.write("AT+CWLAP\r\n");
+    Serial.print(F("AT+CWLAP\r\n"));
     serial_get("\r\n", ESP_MEDIUM_DELAY, serialBuffer, sizeof(serialBuffer));
     do
     {
@@ -117,7 +117,7 @@ uint32_t ESP8266::getUnixTimestamp(void)
 
     /* Conecta ao servidor */
     serial_flush();
-    Serial.write("AT+CIPSTART=0,\"TCP\",\"time.nist.gov\",37\r\n");
+    Serial.print(F("AT+CIPSTART=0,\"TCP\",\"time.nist.gov\",37\r\n"));
     if (!serial_get("+IPD,0,4:", ESP_LONG_DELAY, NULL, 0))
         return 0;
 
@@ -135,7 +135,7 @@ uint32_t ESP8266::getUnixTimestamp(void)
 }
 
 /*******************************************************************************
-   setAP
+   connect_ap
 ****************************************************************************/
 /**
  * @brief Connect with the AP using the SSID and password.
@@ -143,45 +143,45 @@ uint32_t ESP8266::getUnixTimestamp(void)
  * @param ap The access point to connect. 
  * @return True if connection with the AP was successful.\n
 *******************************************************************************/
-bool ESP8266::setAP(esp_mode_t mode, const esp_AP_parameter_t &ap)
+bool ESP8266::connect_ap(const esp_AP_parameter_t &ap)
 {
-    switch (mode)
-    {
-    case ESP_CLIENT_MODE:
-    {
-        /* AT: Desconecta do AP */
-        serial_flush();
-        Serial.write("AT+CWQAP\r\n");
-        serial_get("OK\r\n", 500, NULL, 0);
-        delay(500);
+    /* AT: Desconecta do AP */
+    serial_flush();
+    Serial.print(F("AT+CWQAP\r\n"));
+    serial_get("OK\r\n", 500, NULL, 0);
+    delay(500);
 
-        /* AT: Connectar com AP */
-        serial_flush();
-        Serial.write("AT+CWJAP_DEF=\"");
-        Serial.write(ap.ssid);
-        Serial.write("\",\"");
-        Serial.write(ap.password);
-        Serial.write("\"\r\n");
-        return serial_get("OK\r\n", ESP_LONG_DELAY, NULL, 0); /* timeout: 15s */
-    }
-    break;
+    /* AT: Connectar com AP */
+    serial_flush();
+    Serial.print(F("AT+CWJAP_DEF=\""));
+    Serial.print(ap.ssid);
+    Serial.print(F("\",\""));
+    Serial.print(ap.password);
+    Serial.print(F("\"\r\n"));
 
-    case ESP_SERVER_MODE:
-    {
-        /* Configurar modo AP */
-        Serial.write("AT+CWSAP_DEF=\"");
-        Serial.write(ap.ssid);
-        Serial.write("\",\"");
-        Serial.write(ap.password);
-        Serial.write("\",6,0\r\n");
-        return serial_get("OK\r\n", ESP_LONG_DELAY, NULL, 0);
-    }
-    break;
+    return serial_get("OK\r\n", ESP_LONG_DELAY, NULL, 0); /* timeout: 15s */
+}
 
-    default:
-        return false;
-        break;
-    }
+/*******************************************************************************
+   connect_ap
+****************************************************************************/
+/**
+ * @brief Connect with the AP using the SSID and password.
+ * @param mode Mode of operation.
+ * @param ap The access point to connect. 
+ * @return True if connection with the AP was successful.\n
+*******************************************************************************/
+bool ESP8266::set_ap(const esp_AP_parameter_t &ap)
+{
+    /* Configurar modo AP */
+    Serial.print(F("AT+CWSAP_DEF=\""));
+    Serial.print(ap.ssid);
+    Serial.print(F("\",\""));
+    Serial.print(ap.password);
+    Serial.print(F("\",6,0\r\n"));
+    
+    return serial_get("OK\r\n", ESP_LONG_DELAY, NULL, 0);
+
 }
 
 /*******************************************************************************
@@ -193,9 +193,8 @@ bool ESP8266::setAP(esp_mode_t mode, const esp_AP_parameter_t &ap)
  * @return true if passed sanity check.\n
            false if opposite.
 *******************************************************************************/
-bool ESP8266::config(esp_mode_t mode)
+bool ESP8266::config(void)
 {
-    char strBuffer[100];
     uint32_t delayMS = 250;
 
     /* Inicializa serial em 57600 baud/s */
@@ -217,24 +216,38 @@ bool ESP8266::config(esp_mode_t mode)
     /* Teste de sanidade do módulo ESP8266 */
     /* Valor esperado: 'OK'. Timeout: 100ms. */
     serial_flush();
-    Serial.write("AT\r\n");
+    Serial.print(F("AT\r\n"));
     if (!serial_get("OK\r\n", ESP_SHORT_DELAY, NULL, 0))
         return false;
 
     /* Conexoes multiplas = TRUE */
-    Serial.write("AT+CIPMUX=1\r\n");
+    Serial.print(F("AT+CIPMUX=1\r\n"));
     if (!serial_get("OK\r\n", ESP_SHORT_DELAY, NULL, 0))
         return false;
 
     /* Define modo de operação */
-    /* 'client' / 'server' / 'client' & 'server' */
-    sprintf(strBuffer, "AT+CWMODE_DEF=%d\r\n", mode);
-    Serial.write(strBuffer);
+    /* 1 = 'client' / 2 = 'server' / 3 = 'client' & 'server' */
+    Serial.print(F("AT+CWMODE=3\r\n"));
     if (!serial_get("OK\r\n", ESP_SHORT_DELAY, NULL, 0))
         return false;
 
     /* Tamanho do buffer SSL */
-    Serial.write("AT+CIPSSLSIZE=4096\r\n");
+    Serial.print(F("AT+CIPSSLSIZE=6144\r\n"));
+    if (!serial_get("OK\r\n", ESP_SHORT_DELAY, NULL, 0))
+        return false;
+
+    /* Atualiza o DNS */
+    Serial.print(F("AT+CIPDNS_CUR=1,\"8.8.8.8\",\"1.1.1.1\"\r\n"));
+    if(!serial_get("OK\r\n", ESP_SHORT_DELAY, NULL, 0))
+        return false;
+
+    /* Atualiza nome do host na rede */
+    Serial.print(F("AT+CWHOSTNAME=\"ESP_WIFIWAFER\"\r\n"));
+    if(!serial_get("OK\r\n", ESP_SHORT_DELAY, NULL, 0))
+        return false;
+
+    /* Inicializa modo AP */
+    Serial.print(F("AT+CIPAP=\"192.168.1.1\"\r\n"));
     if (!serial_get("OK\r\n", ESP_SHORT_DELAY, NULL, 0))
         return false;
 
@@ -255,7 +268,7 @@ bool ESP8266::checkWifi(void)
     char strBuffer[100];
 
     serial_flush();
-    Serial.write("AT+CWJAP_DEF?\r\n");
+    Serial.print(F("AT+CWJAP_DEF?\r\n"));
     serial_get("\r\n", ESP_SHORT_DELAY, strBuffer, sizeof(strBuffer));
 
     if (strstr(strBuffer, "+CWJAP_DEF:")) // Valor esperado: '+CWJAP_DEF:'.
@@ -274,44 +287,54 @@ bool ESP8266::checkWifi(void)
  * @return true if connection with the url was successful.\n
            FALSE if oposite.
 *******************************************************************************/
-bool ESP8266::connect(esp_URL_parameter_t &url)
+bool ESP8266::connect(const esp_URL_parameter_t &url)
 {
-    char strBuffer[100];
-    sprintf(strBuffer, "AT+CIPSTART=0,\"SSL\",\"%s\",%u\r\n", url.host, 443);
-
     /* Conecta ao servidor */
     serial_flush();
-    Serial.write(strBuffer);                                   //AT: Connect to the cloud.
+    Serial.print(F("AT+CIPSTART=0,\"SSL\",\""));
+    Serial.print(url.host);
+    Serial.print(F("\",443\r\n"));
+
     return serial_get("CONNECT\r\n", ESP_LONG_DELAY, NULL, 0); // Valor esperado: 'CONNECT'. Timeout: 15s.
 }
 
 /*******************************************************************************
-   server
+   server_start
 ****************************************************************************/
 /**
- * @brief Connect the ESP8266 WiFi module to the cloud.
+ * @brief Starts the webserver.
  * @return true if connection with the url was successful.\n
            FALSE if oposite.
 *******************************************************************************/
-bool ESP8266::server()
+bool ESP8266::server_start()
 {
-    /* Atualiza nome do host na rede */
-    Serial.write("AT+CWHOSTNAME=\"ESP_WIFIWAFER\"\r\n");
-    serial_get("OK\r\n", ESP_MEDIUM_DELAY, NULL, 0);
-
-    /* Inicializa modo AP */
-    Serial.write("AT+CIPAP_DEF=\"192.168.1.1\"\r\n");
-    if (!serial_get("OK\r\n", ESP_MEDIUM_DELAY, NULL, 0))
-        return false;
-
     /* Inicializar AP */
-    Serial.write("AT+CIPSERVER=1,80\r\n");
+    Serial.print(F("AT+CIPSERVER=1,80\r\n"));
     if (!serial_get("OK\r\n", ESP_MEDIUM_DELAY, NULL, 0))
         return false;
 
-    /* Atualiza o DNS */
-    Serial.write("AT+CIPDNS_DEF=1,\"8.8.8.8\",\"1.1.1.1\"\r\n");
-    serial_get("OK\r\n", ESP_MEDIUM_DELAY, NULL, 0);
+    /* Obtem endereço IP */
+    Serial.print(F("AT+CIFSR\r\n"));
+    if (!serial_get("OK\r\n", ESP_MEDIUM_DELAY, NULL, 0))
+        return false;
+
+    return true;
+}
+
+/*******************************************************************************
+   server_stop
+****************************************************************************/
+/**
+ * @brief Stops the webserver.
+ * @return true if connection with the url was successful.\n
+           FALSE if oposite.
+*******************************************************************************/
+bool ESP8266::server_stop()
+{
+    /* Inicializar AP */
+    Serial.print(F("AT+CIPSERVER=0\r\n"));
+    if (!serial_get("OK\r\n", ESP_MEDIUM_DELAY, NULL, 0))
+        return false;
 
     return true;
 }
@@ -331,6 +354,7 @@ bool ESP8266::close(uint8_t connection)
     Serial.print("AT+CIPCLOSE=");
     Serial.print(connection);
     Serial.print("\r\n");
+
     return serial_get("CLOSED\r\n", ESP_SHORT_DELAY, NULL, 0); // Valor esperado: "CLOSED". Timeout: 100ms.
 }
 
@@ -347,7 +371,7 @@ void ESP8266::sleep()
     /* Entra em soft-sleep */
     /* Caso n�o aceite comando, for�a pino de reset */
     serial_flush();
-    Serial.write("AT+GSLP=0\r\n");
+    Serial.print(F("AT+GSLP=0\r\n"));
     if (!serial_get("OK\r\n", ESP_SHORT_DELAY, NULL, 0))
         ESP_DESATIVA;
 }
@@ -368,6 +392,6 @@ void ESP8266::wakeup()
     delay(250);
 
     /* Remove mensagem de eco da serial */
-    Serial.write("ATE0\r\n");
+    Serial.print(F("ATE0\r\n"));
     delay(50);
 }
