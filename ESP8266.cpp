@@ -1,4 +1,4 @@
-/** @file ESP8266.c 
+/** @file ESP8266.cpp
  *  @brief Functions related with the ESP8266 WiFi module.
  */
 #include "ESP8266.h"

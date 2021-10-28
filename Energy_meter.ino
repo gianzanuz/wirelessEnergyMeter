@@ -2,6 +2,7 @@
 #include "ADS1115.h"
 #include "Energy.h"
 #include "CRC.h"
+#include "Timer.h"
 #include <Wire.h>
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
@@ -33,8 +34,11 @@
 #define ESP_CLIENT_SSID "WiFiWaFer - 2.4G"
 #define ESP_CLIENT_PASSWORD "janismexerica19"
 
-/* Período de publicação */
-#define MESSAGE_SAMPLE_RATE (60)
+/* Período de publicação, em segundos */
+#define MESSAGE_SAMPLE_RATE (60u)
+
+/* Período para atualizar a timestamp, em segundos */
+#define TIMESTAMP_REFRESH_TIME (21600u)
 
 /* EEPROM */
 #define EEPROM_ESP_AP_OFFSET (0)
@@ -74,6 +78,10 @@ static Energy energy[CHANNEL_SIZE] = {Energy(CHANNEL_1), Energy(CHANNEL_2)};
 /* Timestamp atual */
 static uint32_t timestamp = 0;
 
+/* Timers */
+static Timer timestampTimer = Timer();
+static Timer publishTimer = Timer();
+
 /*************************************************************************************
   Public prototypes
 *************************************************************************************/
@@ -112,7 +120,7 @@ void (*softReset)(void) = 0;
 /**
  * @brief Initial setup.
  * @return void.
-*******************************************************************************/
+ *******************************************************************************/
 void setup()
 {
 #ifdef LCD_ENABLE
@@ -176,6 +184,10 @@ void setup()
     /* Aplica um delay */
     delay(5000);
   }
+
+  /* Reseta o timer para obter nova timestamp */
+  timestampTimer.resetTimer();
+
 #ifdef LCD_ENABLE
   lcd.clear();
   lcd.print(F("ESP TIMESTAMP:"));
@@ -244,6 +256,9 @@ void setup()
   energy[CHANNEL_1].calculate(timestamp);
   energy[CHANNEL_2].calculate(timestamp);
 
+  /* Restaura timer para publicação de dados */
+  publishTimer.resetTimer();
+
   /* Habilita watchdog */
   wdt_enable(WDTO_8S);
 }
@@ -254,17 +269,17 @@ void setup()
 /**
  * @brief Main loop.
  * @return void.
-*******************************************************************************/
+ *******************************************************************************/
 void loop()
 {
-  static uint32_t previousMillis = 0;
-  uint32_t currentMillis = millis();
-  if ((uint32_t)(currentMillis - previousMillis) > ((uint32_t)MESSAGE_SAMPLE_RATE * 1000))
+  /* Verifica se já passou o período de publicação de dados */
+  if (publishTimer.checkIntervalPassed((uint32_t) MESSAGE_SAMPLE_RATE * 1000u))
   {
     /* Incrementa a timestamp */
-    /* Atualiza tempo decorrido */
-    timestamp += (currentMillis - previousMillis) / 1000;
-    previousMillis = currentMillis;
+    timestamp += publishTimer.getElapsedTime() / 1000u;
+
+    /* Reseta o timer de publicação */
+    publishTimer.resetTimer();
 
     /* Finaliza o cálculo de energia elétrica */
     energy[CHANNEL_1].calculate(timestamp);
@@ -280,6 +295,26 @@ void loop()
     esp.server_start();
 
     serial_flush();
+  }
+
+  /* Verifica se passou do período de obter nova timestamp */
+  if (timestampTimer.checkIntervalPassed((uint32_t) TIMESTAMP_REFRESH_TIME * 1000u))
+  {
+    /* Reseta o timer para obter a timestamp */
+    timestampTimer.resetTimer();
+
+    /* Tenta obter nova timestamp do servidor */
+    uint32_t newTimestamp = esp.getUnixTimestamp();
+    if (newTimestamp != 0)
+      timestamp = newTimestamp;
+
+#ifdef LCD_ENABLE
+    lcd.clear();
+    lcd.print(F("ESP TIMESTAMP:"));
+    lcd.setCursor(0, 1);
+    lcd.print(newTimestamp);
+    delay(3000);
+#endif
   }
 
   /* Verifica se houve conexão ao servidor do ESP8266 */
@@ -916,7 +951,7 @@ bool WEB_process_POST(uint8_t connection, char *path, char *body, uint32_t bodyS
  * @brief
  * @param
  * @return
-*******************************************************************************/
+ *******************************************************************************/
 bool WEB_chunk_init(uint8_t connection)
 {
   /* ESP8266: Inicializar envio */
@@ -939,7 +974,7 @@ bool WEB_chunk_init(uint8_t connection)
  * @brief
  * @param
  * @return
-*******************************************************************************/
+ *******************************************************************************/
 void WEB_chunk_send(char *chuck)
 {
   /* ENVIO DO CHUNCK */
@@ -954,7 +989,7 @@ void WEB_chunk_send(char *chuck)
  * @brief
  * @param
  * @return
-*******************************************************************************/
+ *******************************************************************************/
 bool WEB_chunk_finish(void)
 {
   /* Finaliza envio e obtém confirmação */
@@ -975,7 +1010,7 @@ bool WEB_chunk_finish(void)
  * @brief
  * @param
  * @return
-*******************************************************************************/
+ *******************************************************************************/
 bool WEB_headers(uint8_t connection)
 {
   /* ESP8266: Inicializar 1º envio */
@@ -1004,7 +1039,7 @@ bool WEB_headers(uint8_t connection)
  * @brief
  * @param
  * @return
-*******************************************************************************/
+ *******************************************************************************/
 bool WEB_204_no_content(uint8_t connection)
 {
   /* ESP8266: Inicializar 1º envio */
@@ -1022,7 +1057,7 @@ bool WEB_204_no_content(uint8_t connection)
   Serial.print(F("\r\n"));
 
   /* Finaliza conexão */
-  if(!WEB_chunk_finish())
+  if (!WEB_chunk_finish())
     return false;
 
   return true;
@@ -1035,7 +1070,7 @@ bool WEB_204_no_content(uint8_t connection)
  * @brief
  * @param
  * @return
-*******************************************************************************/
+ *******************************************************************************/
 bool WEB_400_bad_request(uint8_t connection)
 {
   /* ESP8266: Inicializar 1º envio */
@@ -1053,7 +1088,7 @@ bool WEB_400_bad_request(uint8_t connection)
   Serial.print(F("\r\n"));
 
   /* Finaliza conexão */
-  if(!WEB_chunk_finish())
+  if (!WEB_chunk_finish())
     return false;
 
   return true;
@@ -1062,7 +1097,7 @@ bool WEB_400_bad_request(uint8_t connection)
 /************************************************************************************
   EEPROM_write
 
-  
+
 
 ************************************************************************************/
 bool EEPROM_write(const uint8_t *buffer, int size, int addr)
@@ -1079,7 +1114,7 @@ bool EEPROM_write(const uint8_t *buffer, int size, int addr)
 /************************************************************************************
   EEPROM_read
 
-  
+
 
 ************************************************************************************/
 bool EEPROM_read(uint8_t *buffer, int size, int addr)
@@ -1130,7 +1165,7 @@ bool serial_get(const char *stringChecked, uint32_t timeout, char *returnBuffer,
 {
   uint16_t position = 0;
   uint16_t returnBufferPosition = 0;
-  uint32_t lastMillis = millis();
+  Timer serialTimer = Timer();
 
   /* Verifica argumentos de entrada */
   if (stringChecked[position] == '\0' || timeout == 0)
@@ -1182,7 +1217,7 @@ bool serial_get(const char *stringChecked, uint32_t timeout, char *returnBuffer,
     }
 
     /* Verifica se já passou o limite */
-    if (((uint32_t)millis() - lastMillis) > timeout)
+    if (serialTimer.checkIntervalPassed(timeout))
       return false;
 
     /* Atualiza watchdog */

@@ -21,15 +21,15 @@
 
 /* Config */
 #define ESP_SLEEP /**< Enable/Disable the module entering deep-sleep */
-#define ESP_AP_LIST_SIZE (5)
+#define ESP_AP_LIST_SIZE (5u)
 
 /* Delay */
-#define ESP_SHORT_DELAY (100)
-#define ESP_MEDIUM_DELAY (1000)
-#define ESP_LONG_DELAY (15000)
+#define ESP_SHORT_DELAY (100u)
+#define ESP_MEDIUM_DELAY (1000u)
+#define ESP_LONG_DELAY (15000u)
 
 /* Other */
-#define ESP_CLOSE_ALL (5)
+#define ESP_CLOSE_ALL (5u)
 
 /*************************************************************************************
 * Public prototypes

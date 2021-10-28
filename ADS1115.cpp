@@ -1,4 +1,4 @@
-/** @file ADS1115.c 
+/** @file ADS1115.cpp
  *  @brief Functions related with the ADS1115 I2C 16bits ADC.
  */
 #include "ADS1115.h"

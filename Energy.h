@@ -13,12 +13,13 @@
 /*************************************************************************************
 * Macros
 *************************************************************************************/
-#define ENERGY_DEFAULT_LINE_VOLTAGE_VOLTS (127)
-#define ENERGY_DEFAULT_POWER_FACTOR_PERCENT (87)
-#define ENERGY_DEFAULT_SCALE (50) /* 50A - 1V */
-#define ENERGY_DEFAULT_DATA_SIZE (500)
-#define ENERGY_DEFAULT_KWH_BASE_PRICE (0.828844) /* R$/kWh */
-#define ENERGY_DEFAULT_KWH_FLAG_PRICE (0.142)	 /* R$/kWh */
+#define ENERGY_DEFAULT_LINE_VOLTAGE_VOLTS (127u)
+#define ENERGY_DEFAULT_POWER_FACTOR_PERCENT (87u)
+#define ENERGY_DEFAULT_SCALE (50u) /* 50A - 1V */
+#define ENERGY_DEFAULT_DATA_SIZE (500u)
+#define ENERGY_DEFAULT_KWH_BASE_PRICE (0.828844f) /* R$/kWh */
+#define ENERGY_DEFAULT_KWH_FLAG_PRICE (0.142f)	 /* R$/kWh */
+#define ENERGY_DEFAULT_TIMEZONE (-3)
 
 /*************************************************************************************
 * Public prototypes

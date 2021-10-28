@@ -1,4 +1,4 @@
-/** @file Energy.c 
+/** @file Energy.cpp
  *  @brief Functions related with the Energy I2C 16bits ADC.
  */
 
@@ -56,7 +56,7 @@ bool Energy::measure()
         ads.readData(&ADS1115Data);
 
         /* Realiza os cálculos */
-        float adc = ADS1115Data.data_byte[0] * 0.0625; /* 0.0625 = 2048.0/32768.0 */
+        float adc = ADS1115Data.data_byte[0] * 0.0625f; /* 0.0625 = 2048.0/32768.0 */
         sum += adc * adc;
     }
     this->rmsLast = sqrt(sum / this->config.dataSize) * this->config.scale * 1e-3; /* Corrente RMS [A] */
@@ -91,8 +91,13 @@ bool Energy::calculate(uint32_t currentTimestamp)
     this->rmsLast = 0;
     this->rmsCount = 0;
 
-    /* Verifica se houve troca no dia */
+    /* Obtém y2k Epoch a partir de Unix Epoch */
     time_t y2kEpoch = currentTimestamp - 946684800ul;
+
+    /* Corrige o timezone */
+    y2kEpoch += ENERGY_DEFAULT_TIMEZONE * 3600;
+
+    /* Verifica se houve troca no dia */
     struct tm* timeStruct = localtime((const time_t*) &y2kEpoch);
     if(timeStruct->tm_mday != this->config.currentDay)
     {
@@ -103,13 +108,13 @@ bool Energy::calculate(uint32_t currentTimestamp)
     }
 
     /* Obtém o acumulado de corrente elétrica no perído, em amperes-hora */
-    this->currentAccumulatedAmperesHour += this->currentAmperes * (currentTimestamp - this->lastTimestamp)/3600;
+    this->currentAccumulatedAmperesHour += this->currentAmperes * (currentTimestamp - this->lastTimestamp) / 3600u;
 
     /* Obtém a potência elétrica média da carga no período, em kW */
-    float electricPowerKiloWatts = this->currentAmperes * this->config.lineVoltage * this->config.powerFactor / 100000;
+    float electricPowerKiloWatts = this->currentAmperes * this->config.lineVoltage * this->config.powerFactor / 100000u;
 
     /* Obtém a energia elétrica no período, em kilowatts-hora */
-    float energyKiloWattsHour = electricPowerKiloWatts * (currentTimestamp - this->lastTimestamp) / 3600;
+    float energyKiloWattsHour = electricPowerKiloWatts * (currentTimestamp - this->lastTimestamp) / 3600u;
 
     /* Obtém o acumulado de energia elétrica no dia, em kilowatts-hora */
     this->energyAccumulatedKiloWattsHour += energyKiloWattsHour;
