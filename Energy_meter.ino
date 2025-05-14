@@ -1,3 +1,4 @@
+#include "config.h"
 #include "ESP8266.h"
 #include "ADS1115.h"
 #include "Energy.h"
@@ -21,18 +22,6 @@
 /* Chave bipolar */
 #define SWT1 (3)
 #define SWT2 (4)
-
-/* Configurações Firebase */
-#define FIREBASE_SOURCE_ID "02:AB:C4:FF:3F"
-#define FIREBASE_HOST "wirelessrht.firebaseio.com"
-#define FIREBASE_PATH "/"
-#define FIREBASE_PORT (443)
-#define FIREBASE_AUTH "iUwJfO2uiu820Q2uzXMbBGqFM9iTUKsYDpokPcbI"
-#define FIREBASE_CLIENT "AarXB9uiCDfQX53NqsXJbLY2Umz2" /* gianzanuz@gmail.com */
-
-/* Dados do AP */
-#define ESP_CLIENT_SSID "WiFiWaFer - 2.4G"
-#define ESP_CLIENT_PASSWORD "janismexerica19"
 
 /* Período de publicação, em segundos */
 #define MESSAGE_SAMPLE_RATE (60u)
